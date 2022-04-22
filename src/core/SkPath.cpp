@@ -20,6 +20,7 @@
 #include "src/core/SkPointPriv.h"
 #include "src/core/SkTLazy.h"
 #include "src/pathops/SkPathOpsPoint.h"
+#include "src/gpu/geometry/GrAATriangulator.h"
 
 namespace pk {
 static float poly_eval(float A, float B, float C, float t) {
@@ -2444,5 +2445,11 @@ bool SkPathPriv::IsAxisAligned(const SkPath& path) {
     }
   }
   return true;
+}
+
+int SkPath::toAATriangles(float tolerance,
+                          const SkRect& clipBounds,
+                          std::vector<float>* vertex) const {
+  return GrAATriangulator::PathToAATriangles(*this, tolerance, clipBounds, vertex);
 }
 }  // namespace pk

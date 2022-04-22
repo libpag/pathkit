@@ -13,6 +13,7 @@
 #include "include/private/SkTo.h"
 
 #include <initializer_list>
+#include <vector>
 
 namespace pk {
 class SkAutoPathBoundsUpdate;
@@ -893,6 +894,8 @@ public:
         @return  SegmentMask bits or zero
     */
     uint32_t getSegmentMasks() const { return fPathRef->getSegmentMasks(); }
+
+    int toAATriangles(float tolerance, const SkRect& clipBounds, std::vector<float>* vertex) const;
 
     /** \enum SkPath::Verb
         Verb instructs SkPath how to interpret one or more SkPoint and optional conic weight;

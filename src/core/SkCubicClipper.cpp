@@ -5,10 +5,7 @@
  * found in the LICENSE file.
  */
 
-#include <utility>
-
 #include "src/core/SkCubicClipper.h"
-#include "src/core/SkGeometry.h"
 
 namespace pk {
 bool SkCubicClipper::ChopMonoAtY(const SkPoint pts[4], SkScalar y, SkScalar* t) {
