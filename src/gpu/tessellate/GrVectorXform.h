@@ -18,8 +18,8 @@ namespace pk {
 //
 class GrVectorXform {
 public:
-    using float2 = skvx::Vec<2, float>;
-    using float4 = skvx::Vec<4, float>;
+    using float2 = pkvx::Vec<2, float>;
+    using float4 = pkvx::Vec<4, float>;
     explicit GrVectorXform() : fType(Type::kIdentity) {}
     explicit GrVectorXform(const SkMatrix& m) { *this = m; }
     GrVectorXform& operator=(const SkMatrix& m) {
@@ -55,7 +55,7 @@ public:
             case Type::kScale:
                 return vectors * fScaleXYXY;
             case Type::kAffine:
-                return fScaleXYXY * vectors + fSkewXYXY * skvx::shuffle<1, 0, 3, 2>(vectors);
+                return fScaleXYXY * vectors + fSkewXYXY * pkvx::shuffle<1, 0, 3, 2>(vectors);
         }
     }
 

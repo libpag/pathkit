@@ -339,24 +339,24 @@ int SkFindCubicExtrema(SkScalar a, SkScalar b, SkScalar c, SkScalar d, SkScalar 
 // "a*(1 - t) + b*t" for things like chopping cubics on exact cusp points.
 // The responsibility falls on the caller to check that t != 1 before calling.
 template <int N, typename T>
-inline static skvx::Vec<N, T> unchecked_mix(const skvx::Vec<N, T>& a,
-                                            const skvx::Vec<N, T>& b,
-                                            const skvx::Vec<N, T>& t) {
+inline static pkvx::Vec<N, T> unchecked_mix(const pkvx::Vec<N, T>& a,
+                                            const pkvx::Vec<N, T>& b,
+                                            const pkvx::Vec<N, T>& t) {
     return (b - a) * t + a;
 }
 
 void SkChopCubicAt(const SkPoint src[4], SkPoint dst[7], SkScalar t) {
-    using float2 = skvx::Vec<2, float>;
+    using float2 = pkvx::Vec<2, float>;
     if (t == 1) {
         memcpy(dst, src, sizeof(SkPoint) * 4);
         dst[4] = dst[5] = dst[6] = src[3];
         return;
     }
 
-    float2 p0 = skvx::bit_pun<float2>(src[0]);
-    float2 p1 = skvx::bit_pun<float2>(src[1]);
-    float2 p2 = skvx::bit_pun<float2>(src[2]);
-    float2 p3 = skvx::bit_pun<float2>(src[3]);
+    float2 p0 = pkvx::bit_pun<float2>(src[0]);
+    float2 p1 = pkvx::bit_pun<float2>(src[1]);
+    float2 p2 = pkvx::bit_pun<float2>(src[2]);
+    float2 p3 = pkvx::bit_pun<float2>(src[3]);
     float2 T = t;
 
     float2 ab = unchecked_mix(p0, p1, T);
@@ -366,18 +366,18 @@ void SkChopCubicAt(const SkPoint src[4], SkPoint dst[7], SkScalar t) {
     float2 bcd = unchecked_mix(bc, cd, T);
     float2 abcd = unchecked_mix(abc, bcd, T);
 
-    dst[0] = skvx::bit_pun<SkPoint>(p0);
-    dst[1] = skvx::bit_pun<SkPoint>(ab);
-    dst[2] = skvx::bit_pun<SkPoint>(abc);
-    dst[3] = skvx::bit_pun<SkPoint>(abcd);
-    dst[4] = skvx::bit_pun<SkPoint>(bcd);
-    dst[5] = skvx::bit_pun<SkPoint>(cd);
-    dst[6] = skvx::bit_pun<SkPoint>(p3);
+    dst[0] = pkvx::bit_pun<SkPoint>(p0);
+    dst[1] = pkvx::bit_pun<SkPoint>(ab);
+    dst[2] = pkvx::bit_pun<SkPoint>(abc);
+    dst[3] = pkvx::bit_pun<SkPoint>(abcd);
+    dst[4] = pkvx::bit_pun<SkPoint>(bcd);
+    dst[5] = pkvx::bit_pun<SkPoint>(cd);
+    dst[6] = pkvx::bit_pun<SkPoint>(p3);
 }
 
 void SkChopCubicAt(const SkPoint src[4], SkPoint dst[10], float t0, float t1) {
-    using float4 = skvx::Vec<4, float>;
-    using float2 = skvx::Vec<2, float>;
+    using float4 = pkvx::Vec<4, float>;
+    using float2 = pkvx::Vec<2, float>;
     if (t1 == 1) {
         SkChopCubicAt(src, dst, t0);
         dst[7] = dst[8] = dst[9] = src[3];
@@ -386,10 +386,10 @@ void SkChopCubicAt(const SkPoint src[4], SkPoint dst[10], float t0, float t1) {
 
     // Perform both chops in parallel using 4-lane SIMD.
     float4 p00, p11, p22, p33, T;
-    p00.lo = p00.hi = skvx::bit_pun<float2>(src[0]);
-    p11.lo = p11.hi = skvx::bit_pun<float2>(src[1]);
-    p22.lo = p22.hi = skvx::bit_pun<float2>(src[2]);
-    p33.lo = p33.hi = skvx::bit_pun<float2>(src[3]);
+    p00.lo = p00.hi = pkvx::bit_pun<float2>(src[0]);
+    p11.lo = p11.hi = pkvx::bit_pun<float2>(src[1]);
+    p22.lo = p22.hi = pkvx::bit_pun<float2>(src[2]);
+    p33.lo = p33.hi = pkvx::bit_pun<float2>(src[3]);
     T.lo = t0;
     T.hi = t1;
 
@@ -399,21 +399,21 @@ void SkChopCubicAt(const SkPoint src[4], SkPoint dst[10], float t0, float t1) {
     float4 abc = unchecked_mix(ab, bc, T);
     float4 bcd = unchecked_mix(bc, cd, T);
     float4 abcd = unchecked_mix(abc, bcd, T);
-    float4 middle = unchecked_mix(abc, bcd, skvx::shuffle<2, 3, 0, 1>(T));
+    float4 middle = unchecked_mix(abc, bcd, pkvx::shuffle<2, 3, 0, 1>(T));
 
-    dst[0] = skvx::bit_pun<SkPoint>(p00.lo);
-    dst[1] = skvx::bit_pun<SkPoint>(ab.lo);
-    dst[2] = skvx::bit_pun<SkPoint>(abc.lo);
-    dst[3] = skvx::bit_pun<SkPoint>(abcd.lo);
+    dst[0] = pkvx::bit_pun<SkPoint>(p00.lo);
+    dst[1] = pkvx::bit_pun<SkPoint>(ab.lo);
+    dst[2] = pkvx::bit_pun<SkPoint>(abc.lo);
+    dst[3] = pkvx::bit_pun<SkPoint>(abcd.lo);
     middle.store(dst + 4);
-    dst[6] = skvx::bit_pun<SkPoint>(abcd.hi);
-    dst[7] = skvx::bit_pun<SkPoint>(bcd.hi);
-    dst[8] = skvx::bit_pun<SkPoint>(cd.hi);
-    dst[9] = skvx::bit_pun<SkPoint>(p33.hi);
+    dst[6] = pkvx::bit_pun<SkPoint>(abcd.hi);
+    dst[7] = pkvx::bit_pun<SkPoint>(bcd.hi);
+    dst[8] = pkvx::bit_pun<SkPoint>(cd.hi);
+    dst[9] = pkvx::bit_pun<SkPoint>(p33.hi);
 }
 
 void SkChopCubicAt(const SkPoint src[4], SkPoint dst[], const SkScalar tValues[], int tCount) {
-    using float2 = skvx::Vec<2, float>;
+    using float2 = pkvx::Vec<2, float>;
 
     if (dst) {
         if (tCount == 0) {  // nothing to chop
@@ -425,7 +425,7 @@ void SkChopCubicAt(const SkPoint src[4], SkPoint dst[], const SkScalar tValues[]
                 float2 tt = float2::Load(tValues + i);
                 if (i != 0) {
                     float lastT = tValues[i - 1];
-                    tt = skvx::pin((tt - lastT) / (1 - lastT), float2(0), float2(1));
+                    tt = pkvx::pin((tt - lastT) / (1 - lastT), float2(0), float2(1));
                 }
                 SkChopCubicAt(src, dst, tt[0], tt[1]);
                 src = dst = dst + 6;

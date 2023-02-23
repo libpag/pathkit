@@ -12,7 +12,7 @@
 #include "include/private/SkVx.h"
 
 namespace pk {
-// grvx is Ganesh's addendum to skvx, Skia's SIMD library. Here we introduce functions that are
+// grvx is Ganesh's addendum to pkvx, Skia's SIMD library. Here we introduce functions that are
 // approximate and/or have LSB differences from platform to platform (e.g., by using hardware FMAs
 // when available). When a function is approximate, its error range is well documented and tested.
 namespace grvx {
@@ -24,15 +24,15 @@ namespace grvx {
 #endif
 
 // Use familiar type names and functions from SkSL and GLSL.
-template<int N> using vec = skvx::Vec<N, float>;
+template<int N> using vec = pkvx::Vec<N, float>;
 using float2 = vec<2>;
 using float4 = vec<4>;
 
-template<int N> using ivec = skvx::Vec<N, int32_t>;
+template<int N> using ivec = pkvx::Vec<N, int32_t>;
 using int2 = ivec<2>;
 using int4 = ivec<4>;
 
-template<int N> using uvec = skvx::Vec<N, uint32_t>;
+template<int N> using uvec = pkvx::Vec<N, uint32_t>;
 using uint2 = uvec<2>;
 using uint4 = uvec<4>;
 
@@ -42,7 +42,7 @@ static PK_ALWAYS_INLINE float dot(float2 a, float2 b) {
 }
 
 static PK_ALWAYS_INLINE float cross(float2 a, float2 b) {
-    float2 x = a*skvx::shuffle<1,0>(b);
+    float2 x = a*pkvx::shuffle<1,0>(b);
     return x[0] - x[1];
 }
 
@@ -51,7 +51,7 @@ static PK_ALWAYS_INLINE float cross(float2 a, float2 b) {
 // give different results on different platforms.
 template<int N> PK_ALWAYS_INLINE vec<N> fast_madd(vec<N> f, vec<N> m, vec<N> a) {
 #if FP_FAST_FMAF
-    return skvx::fma(f,m,a);
+    return pkvx::fma(f,m,a);
 #else
     return f*m + a;
 #endif
@@ -92,9 +92,9 @@ template<int N> PK_ALWAYS_INLINE vec<N> approx_acos(vec<N> x) {
 template<int Nx2>
 PK_ALWAYS_INLINE vec<Nx2/2> approx_angle_between_vectors(vec<Nx2> a, vec<Nx2> b) {
     auto aa=a*a, bb=b*b, ab=a*b;
-    auto cosTheta = (ab.lo + ab.hi) / skvx::sqrt((aa.lo + aa.hi) * (bb.lo + bb.hi));
+    auto cosTheta = (ab.lo + ab.hi) / pkvx::sqrt((aa.lo + aa.hi) * (bb.lo + bb.hi));
     // Clamp cosTheta such that if it is NaN (e.g., if a or b was 0), then we return acos(1) = 0.
-    cosTheta = skvx::max(skvx::min(1, cosTheta), -1);
+    cosTheta = pkvx::max(pkvx::min(1, cosTheta), -1);
     return approx_acos(cosTheta);
 }
 
@@ -103,8 +103,8 @@ PK_ALWAYS_INLINE vec<Nx2/2> approx_angle_between_vectors(vec<Nx2> a, vec<Nx2> b)
 // WARNING: These are really only supported well on NEON. Consider restructuring your data before
 // resorting to these methods.
 template<typename T>
-PK_ALWAYS_INLINE void strided_load4(const T* v, skvx::Vec<1,T>& a, skvx::Vec<1,T>& b,
-                                    skvx::Vec<1,T>& c, skvx::Vec<1,T>& d) {
+PK_ALWAYS_INLINE void strided_load4(const T* v, pkvx::Vec<1,T>& a, pkvx::Vec<1,T>& b,
+                                    pkvx::Vec<1,T>& c, pkvx::Vec<1,T>& d) {
     a.val = v[0];
     b.val = v[1];
     c.val = v[2];
@@ -112,8 +112,8 @@ PK_ALWAYS_INLINE void strided_load4(const T* v, skvx::Vec<1,T>& a, skvx::Vec<1,T
 }
 template<int N, typename T>
 PK_ALWAYS_INLINE typename std::enable_if<N >= 2, void>::type
-strided_load4(const T* v, skvx::Vec<N,T>& a, skvx::Vec<N,T>& b, skvx::Vec<N,T>& c,
-              skvx::Vec<N,T>& d) {
+strided_load4(const T* v, pkvx::Vec<N,T>& a, pkvx::Vec<N,T>& b, pkvx::Vec<N,T>& c,
+              pkvx::Vec<N,T>& d) {
     strided_load4(v, a.lo, b.lo, c.lo, d.lo);
     strided_load4(v + 4*(N/2), a.hi, b.hi, c.hi, d.hi);
 }
@@ -121,13 +121,13 @@ strided_load4(const T* v, skvx::Vec<N,T>& a, skvx::Vec<N,T>& b, skvx::Vec<N,T>& 
 #if defined(__ARM_NEON)
 #define IMPL_LOAD4_TRANSPOSED(N, T, VLD) \
 template<> \
-PK_ALWAYS_INLINE void strided_load4(const T* v, skvx::Vec<N,T>& a, skvx::Vec<N,T>& b, \
-                                    skvx::Vec<N,T>& c, skvx::Vec<N,T>& d) { \
+PK_ALWAYS_INLINE void strided_load4(const T* v, pkvx::Vec<N,T>& a, pkvx::Vec<N,T>& b, \
+                                    pkvx::Vec<N,T>& c, pkvx::Vec<N,T>& d) { \
     auto mat = VLD(v); \
-    a = skvx::bit_pun<skvx::Vec<N,T>>(mat.val[0]); \
-    b = skvx::bit_pun<skvx::Vec<N,T>>(mat.val[1]); \
-    c = skvx::bit_pun<skvx::Vec<N,T>>(mat.val[2]); \
-    d = skvx::bit_pun<skvx::Vec<N,T>>(mat.val[3]); \
+    a = pkvx::bit_pun<pkvx::Vec<N,T>>(mat.val[0]); \
+    b = pkvx::bit_pun<pkvx::Vec<N,T>>(mat.val[1]); \
+    c = pkvx::bit_pun<pkvx::Vec<N,T>>(mat.val[2]); \
+    d = pkvx::bit_pun<pkvx::Vec<N,T>>(mat.val[3]); \
 }
 IMPL_LOAD4_TRANSPOSED(2, uint32_t, vld4_u32);
 IMPL_LOAD4_TRANSPOSED(4, uint16_t, vld4_u16);
@@ -147,7 +147,7 @@ IMPL_LOAD4_TRANSPOSED(4, float, vld4q_f32);
 #elif defined(__SSE__)
 template<>
 PK_ALWAYS_INLINE void strided_load4(const float* v, float4& a, float4& b, float4& c, float4& d) {
-    using skvx::bit_pun;
+    using pkvx::bit_pun;
     __m128 a_ = _mm_loadu_ps(v);
     __m128 b_ = _mm_loadu_ps(v+4);
     __m128 c_ = _mm_loadu_ps(v+8);
@@ -166,13 +166,13 @@ PK_ALWAYS_INLINE void strided_load4(const float* v, float4& a, float4& b, float4
 // WARNING: These are really only supported well on NEON. Consider restructuring your data before
 // resorting to these methods.
 template<typename T>
-PK_ALWAYS_INLINE void strided_load2(const T* v, skvx::Vec<1,T>& a, skvx::Vec<1,T>& b) {
+PK_ALWAYS_INLINE void strided_load2(const T* v, pkvx::Vec<1,T>& a, pkvx::Vec<1,T>& b) {
     a.val = v[0];
     b.val = v[1];
 }
 template<int N, typename T>
 PK_ALWAYS_INLINE typename std::enable_if<N >= 2, void>::type
-strided_load2(const T* v, skvx::Vec<N,T>& a, skvx::Vec<N,T>& b) {
+strided_load2(const T* v, pkvx::Vec<N,T>& a, pkvx::Vec<N,T>& b) {
     strided_load2(v, a.lo, b.lo);
     strided_load2(v + 2*(N/2), a.hi, b.hi);
 }
@@ -180,10 +180,10 @@ strided_load2(const T* v, skvx::Vec<N,T>& a, skvx::Vec<N,T>& b) {
 #if defined(__ARM_NEON)
 #define IMPL_LOAD2_TRANSPOSED(N, T, VLD) \
 template<> \
-PK_ALWAYS_INLINE void strided_load2(const T* v, skvx::Vec<N,T>& a, skvx::Vec<N,T>& b) { \
+PK_ALWAYS_INLINE void strided_load2(const T* v, pkvx::Vec<N,T>& a, pkvx::Vec<N,T>& b) { \
     auto mat = VLD(v); \
-    a = skvx::bit_pun<skvx::Vec<N,T>>(mat.val[0]); \
-    b = skvx::bit_pun<skvx::Vec<N,T>>(mat.val[1]); \
+    a = pkvx::bit_pun<pkvx::Vec<N,T>>(mat.val[0]); \
+    b = pkvx::bit_pun<pkvx::Vec<N,T>>(mat.val[1]); \
 }
 IMPL_LOAD2_TRANSPOSED(2, uint32_t, vld2_u32);
 IMPL_LOAD2_TRANSPOSED(4, uint16_t, vld2_u16);
