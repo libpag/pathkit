@@ -7,14 +7,14 @@
 
 #pragma once
 
-// pkvx::Vec<N,T> are SIMD vectors of N T's, a v1.5 successor to SkNx<N,T>.
+// skvx::Vec<N,T> are SIMD vectors of N T's, a v1.5 successor to SkNx<N,T>.
 //
 // This time we're leaning a bit less on platform-specific intrinsics and a bit
 // more on Clang/GCC vector extensions, but still keeping the option open to
 // drop in platform-specific intrinsics, actually more easily than before.
 //
 // We've also fixed a few of the caveats that used to make SkNx awkward to work
-// with across translation units.  pkvx::Vec<N,T> always has N*sizeof(T) size
+// with across translation units.  skvx::Vec<N,T> always has N*sizeof(T) size
 // and alignment and is safe to use across translation units freely.
 // (Ideally we'd only align to T, but that tanks ARMv7 NEON codegen.)
 
@@ -63,7 +63,7 @@
                        typename=std::enable_if_t<std::is_convertible<U,T>::value>> SI
 
 namespace pk {
-namespace pkvx {
+namespace skvx {
 
 template <int N, typename T>
 struct alignas(N*sizeof(T)) Vec;
@@ -501,7 +501,7 @@ SINT bool any(const Vec<N,T>& x) {
 #if PKVX_USE_SIMD && defined(__SSE__)
    if constexpr (N*sizeof(T) == 16) {
        // On SSE, movemask checks only the MSB in each lane, which is fine if the lanes were set
-       // directly from a comparison op (which sets all bits to 1 when true), but pkvx::Vec<>
+       // directly from a comparison op (which sets all bits to 1 when true), but skvx::Vec<>
        // treats any non-zero value as true, so we have to compare 'x' to 0 before calling movemask
        return _mm_movemask_ps(_mm_cmpneq_ps(bit_pun<__m128>(x), _mm_set1_ps(0))) != 0b0000;
    }
@@ -586,7 +586,7 @@ SINT Vec<N,T> pin(const Vec<N,T>& x, const Vec<N,T>& lo, const Vec<N,T>& hi) {
 }
 
 // Shuffle values from a vector pretty arbitrarily:
-//    pkvx::Vec<4,float> rgba = {R,G,B,A};
+//    skvx::Vec<4,float> rgba = {R,G,B,A};
 //    shuffle<2,1,0,3>        (rgba) ~> {B,G,R,A}
 //    shuffle<2,1>            (rgba) ~> {B,G}
 //    shuffle<2,1,2,1,2,1,2,1>(rgba) ~> {B,G,B,G,B,G,B,G}
@@ -607,7 +607,7 @@ SI Vec<sizeof...(Ix),T> shuffle(const Vec<N,T>& x) {
 
 template <typename Fn, typename... Args, size_t... I>
 SI auto map(std::index_sequence<I...>,
-           Fn&& fn, const Args&... args) -> pkvx::Vec<sizeof...(I), decltype(fn(args[0]...))> {
+           Fn&& fn, const Args&... args) -> skvx::Vec<sizeof...(I), decltype(fn(args[0]...))> {
    auto lane = [&](size_t i)
 #if defined(__clang__)
            // CFI, specifically -fsanitize=cfi-icall, seems to give a false positive here,
@@ -852,7 +852,7 @@ SIN Vec<N,uint16_t> mulhi(const Vec<N,uint16_t>& x,
        return join(mulhi(x.lo, y.lo), mulhi(x.hi, y.hi));
    }
 #else
-   return pkvx::cast<uint16_t>(mull(x, y) >> 16);
+   return skvx::cast<uint16_t>(mull(x, y) >> 16);
 #endif
 }
 
@@ -1013,7 +1013,7 @@ using half2   = Vec< 2, uint16_t>;
 using half4   = Vec< 4, uint16_t>;
 using half8   = Vec< 8, uint16_t>;
 
-}  // namespace pkvx
+}  // namespace skvx
 }  // namespace pk
 
 #undef SINTU
