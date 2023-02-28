@@ -785,7 +785,7 @@ public:
    explicit ScaledDividerU32(uint32_t divisor)
            : fDivisorFactor{(uint32_t)(std::round((1.0 / divisor) * (1ull << 32)))}
            , fHalf{(divisor + 1) >> 1} {
-       static_assert(divisor > 1);
+       assert(divisor > 1);
    }
 
    Vec<4, uint32_t> divide(const Vec<4, uint32_t>& numerator) const {
