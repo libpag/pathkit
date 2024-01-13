@@ -2452,4 +2452,11 @@ int SkPath::toAATriangles(float tolerance,
                           std::vector<float>* vertex) const {
   return GrAATriangulator::PathToAATriangles(*this, tolerance, clipBounds, vertex);
 }
+
+int SkPath::toTriangles(float tolerance,
+                        const SkRect& clipBounds,
+                        std::vector<float>* vertex,
+                        bool* isLinear) const {
+  return GrTriangulator::PathToTriangles(*this, tolerance, clipBounds, vertex, isLinear);
+}
 }  // namespace pk

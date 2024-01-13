@@ -895,7 +895,16 @@ public:
     */
     uint32_t getSegmentMasks() const { return fPathRef->getSegmentMasks(); }
 
+    /**
+     * Triangulates the given path in device space with a mesh of alpha ramps for antialiasing.
+     */
     int toAATriangles(float tolerance, const SkRect& clipBounds, std::vector<float>* vertex) const;
+
+    /**
+     * Converting the given path to a collection of triangles.
+     */
+    int toTriangles(float tolerance, const SkRect& clipBounds, std::vector<float>* vertex,
+                    bool* isLinear) const;
 
     /** \enum SkPath::Verb
         Verb instructs SkPath how to interpret one or more SkPoint and optional conic weight;
