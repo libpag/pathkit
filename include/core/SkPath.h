@@ -896,6 +896,11 @@ public:
     uint32_t getSegmentMasks() const { return fPathRef->getSegmentMasks(); }
 
     /**
+     * Returns true if the path contains multiple contours.
+     */
+    bool hasMultipleContours() const;
+
+    /**
      * Triangulates the given path in device space with a mesh of alpha ramps for antialiasing.
      */
     int toAATriangles(float tolerance, const SkRect& clipBounds, std::vector<float>* vertex) const;

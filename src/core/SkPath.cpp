@@ -2447,6 +2447,26 @@ bool SkPathPriv::IsAxisAligned(const SkPath& path) {
   return true;
 }
 
+bool SkPath::hasMultipleContours() const {
+  auto count = fPathRef->countVerbs();
+  const uint8_t* verbs = fPathRef->verbsBegin();
+  bool hasContour = false;
+  for (int i = 0; i < count; ++i) {
+    if (hasContour) {
+      if (*verbs == kMove_Verb) {
+        return true;
+      }
+    } else {
+      if (*verbs == kLine_Verb || *verbs == kQuad_Verb || *verbs == kConic_Verb ||
+          *verbs == kCubic_Verb) {
+        hasContour = true;
+      }
+    }
+    ++verbs;
+  }
+  return false;
+}
+
 int SkPath::toAATriangles(float tolerance,
                           const SkRect& clipBounds,
                           std::vector<float>* vertex) const {
