@@ -809,6 +809,46 @@ SkPath& SkPath::addCircle(SkScalar x, SkScalar y, SkScalar r, SkPathDirection di
   return *this;
 }
 
+/*
+    Need to handle the case when the angle is sharp, and our computed end-points
+    for the arc go behind pt1 and/or p2...
+*/
+void SkPath::arcTo(SkScalar x1, SkScalar y1, SkScalar x2, SkScalar y2, SkScalar radius) {
+    if (radius == 0) {
+        this->lineTo(x1, y1);
+        return;
+    }
+
+    SkVector before, after;
+
+    // need to know our prev pt so we can construct tangent vectors
+    {
+        SkPoint start;
+        this->getLastPt(&start);
+        // Handle degenerate cases by adding a line to the first point and
+        // bailing out.
+        before.setNormalize(x1 - start.fX, y1 - start.fY);
+        after.setNormalize(x2 - x1, y2 - y1);
+    }
+
+    SkScalar cosh = SkPoint::DotProduct(before, after);
+    SkScalar sinh = SkPoint::CrossProduct(before, after);
+
+    if (SkScalarNearlyZero(sinh)) {   // angle is too tight
+        this->lineTo(x1, y1);
+        return;
+    }
+
+    SkScalar dist = PkScalarAbs(radius * (1 - cosh) / sinh);
+
+    SkScalar xx = x1 - dist * before.fX;
+    SkScalar yy = y1 - dist * before.fY;
+    after.setLength(dist);
+    this->lineTo(xx, yy);
+    SkScalar weight = PkScalarSqrt(PK_ScalarHalf + cosh * PK_ScalarHalf);
+    this->conicTo(x1, y1, x1 + after.fX, y1 + after.fY, weight);
+}
+
 SkPath& SkPath::addPath(const SkPath& path, SkScalar dx, SkScalar dy, AddPathMode mode) {
   SkMatrix matrix;
 

@@ -533,6 +533,18 @@ public:
         return this->cubicTo(p1.fX, p1.fY, p2.fX, p2.fY, p3.fX, p3.fY);
     }
 
+    /**
+     *  Append a line and arc to the current path. This is the same as the PostScript call "arct".
+     */
+    void arcTo(SkScalar x1, SkScalar y1, SkScalar x2, SkScalar y2, SkScalar radius);
+
+    /** Append a line and arc to the current path. This is the same as the
+        PostScript call "arct".
+    */
+    void arcTo(const SkPoint p1, const SkPoint p2, SkScalar radius) {
+        this->arcTo(p1.fX, p1.fY, p2.fX, p2.fY, radius);
+    }
+
     /** Appends kClose_Verb to SkPath. A closed contour connects the first and last SkPoint
         with line, forming a continuous loop. Open and closed contour draw the same
         with SkPaint::kFill_Style. With SkPaint::kStroke_Style, open contour draws
