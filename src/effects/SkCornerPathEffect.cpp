@@ -90,6 +90,8 @@ public:
                     if (!prevIsValid) {
                         dst->moveTo(pts[0]);
                         prevIsValid = true;
+                    } else {
+                        dst->lineTo(pts[0]);
                     }
                     dst->quadTo(pts[1], pts[2]);
                     lastCorner = pts[2];
@@ -100,6 +102,8 @@ public:
                     if (!prevIsValid) {
                         dst->moveTo(pts[0]);
                         prevIsValid = true;
+                    } else {
+                        dst->lineTo(pts[0]);
                     }
                     dst->conicTo(pts[1], pts[2], iter.conicWeight());
                     lastCorner = pts[2];
@@ -109,6 +113,8 @@ public:
                     if (!prevIsValid) {
                         dst->moveTo(pts[0]);
                         prevIsValid = true;
+                    } else {
+                        dst->lineTo(pts[0]);
                     }
                     // TBD - just replicate the curve for now
                     dst->cubicTo(pts[1], pts[2], pts[3]);
