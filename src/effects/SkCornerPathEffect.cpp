@@ -90,7 +90,7 @@ public:
                     if (!prevIsValid) {
                         dst->moveTo(pts[0]);
                         prevIsValid = true;
-                    }else {
+                    } else {
                         dst->lineTo(pts[0]);
                     }
                     dst->quadTo(pts[1], pts[2]);
@@ -102,7 +102,7 @@ public:
                     if (!prevIsValid) {
                         dst->moveTo(pts[0]);
                         prevIsValid = true;
-                    }else {
+                    } else {
                         dst->lineTo(pts[0]);
                     }
                     dst->conicTo(pts[1], pts[2], iter.conicWeight());
@@ -113,7 +113,7 @@ public:
                     if (!prevIsValid) {
                         dst->moveTo(pts[0]);
                         prevIsValid = true;
-                    }else {
+                    } else {
                         dst->lineTo(pts[0]);
                     }
                     // TBD - just replicate the curve for now
@@ -156,6 +156,7 @@ public:
 
 private:
     const SkScalar fRadius;
+
     using INHERITED = SkPathEffectBase;
 };
 
