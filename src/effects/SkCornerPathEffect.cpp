@@ -43,14 +43,17 @@ public:
 
         bool        closed;
         SkPoint     moveTo, lastCorner;
-        SkVector    firstStep, step;
+        SkVector    firstStep, step, tempStep;
         bool        prevIsValid = true;
 
         // to avoid warnings
         step.set(0, 0);
         moveTo.set(0, 0);
         firstStep.set(0, 0);
+        tempStep.set(0, 0);
         lastCorner.set(0, 0);
+        SkPath::Verb firstDrawVerb = SkPath::kDone_Verb;
+        SkPath::Verb lastDrawVerb = SkPath::kDone_Verb;
 
         for (;;) {
             switch (verb = iter.next(pts)) {
@@ -122,6 +125,10 @@ public:
                     firstStep.set(0, 0);
                     break;
                 case SkPath::kClose_Verb:
+                    lastDrawVerb = prevVerb;
+                    if(firstDrawVerb == SkPath::kLine_Verb && lastDrawVerb == SkPath::kLine_Verb) {
+                        firstStep = tempStep;
+                    }
                     if (firstStep.fX || firstStep.fY) {
                         dst->quadTo(lastCorner.fX, lastCorner.fY,
                                     lastCorner.fX + firstStep.fX,
@@ -142,6 +149,8 @@ public:
 
             if (SkPath::kMove_Verb == prevVerb) {
                 firstStep = step;
+                firstDrawVerb = verb;
+                tempStep = firstStep;
             }
             prevVerb = verb;
         }
