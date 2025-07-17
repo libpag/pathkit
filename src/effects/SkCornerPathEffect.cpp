@@ -12,7 +12,8 @@
 #include "src/core/SkPathEffectBase.h"
 
 namespace pk {
-float calculateTangentDistances(SkVector v1, SkVector v2, float radius) {
+namespace {
+float ComputeTangentDistances(SkVector v1, SkVector v2, float radius) {
     // Calculate the angle between the two vectors
     float dotProduct = v1.dot(v2);
     float halfAngle = std::acos(dotProduct) / 2.0f;
@@ -20,7 +21,7 @@ float calculateTangentDistances(SkVector v1, SkVector v2, float radius) {
     return radius / std::tan(halfAngle);
 }
 
-float arcCubicBezierHandleLength(SkPoint start,
+float ArcCubicBezierHandleLength(SkPoint start,
                                  SkVector startTangent,
                                  SkPoint end,
                                  SkVector endTangent) {
@@ -33,12 +34,12 @@ float arcCubicBezierHandleLength(SkPoint start,
     return handleLength * radius;
 }
 
-bool calculateCornerCurve(std::array<SkPoint, 4>& startCurve,
-                          const std::shared_ptr<SkPathMeasure>& startMeasure,
-                          std::array<SkPoint, 4>& endCurve,
-                          const std::shared_ptr<SkPathMeasure>& endMeasure,
-                          SkScalar radius,
-                          std::array<SkPoint, 4>& arcCurve) {
+bool BuildCornerCurve(std::array<SkPoint, 4>& startCurve,
+                      const std::shared_ptr<SkPathMeasure>& startMeasure,
+                      std::array<SkPoint, 4>& endCurve,
+                      const std::shared_ptr<SkPathMeasure>& endMeasure,
+                      SkScalar radius,
+                      std::array<SkPoint, 4>& arcCurve) {
     SkVector startDir = startCurve[2] - startCurve[3];
     startDir.normalize();
     SkVector endDir = endCurve[1] - endCurve[0];
@@ -48,7 +49,7 @@ bool calculateCornerCurve(std::array<SkPoint, 4>& startCurve,
         return false;
     }
 
-    auto tangentDistance = calculateTangentDistances(startDir, endDir, radius);
+    auto tangentDistance = ComputeTangentDistances(startDir, endDir, radius);
     auto startCurveLength = startMeasure->getLength();
     auto startTangentDistance = std::min(tangentDistance, startCurveLength / 2.0f);
     auto endCurveLength = endMeasure->getLength();
@@ -101,7 +102,7 @@ bool calculateCornerCurve(std::array<SkPoint, 4>& startCurve,
     }
 
     // build arc curve
-    auto handleLength = arcCubicBezierHandleLength(
+    auto handleLength = ArcCubicBezierHandleLength(
             startTangentPoint, startTangentVector, endTangentPoint, endTangentVector);
     arcCurve = {startTangentPoint,
                 startTangentPoint + startTangentVector * handleLength,
@@ -109,11 +110,11 @@ bool calculateCornerCurve(std::array<SkPoint, 4>& startCurve,
                 endTangentPoint};
     return true;
 }
+}  // namespace
 
 class SkCornerPathEffectImpl : public SkPathEffectBase {
 public:
-    explicit SkCornerPathEffectImpl(SkScalar radius) : fRadius(radius) {
-    }
+    explicit SkCornerPathEffectImpl(SkScalar radius) : fRadius(radius) {}
 
     bool onFilterPath(SkPath* dst,
                       const SkPath& src,
@@ -220,7 +221,7 @@ public:
 
             if (verb != SkPath::kClose_Verb && verb != SkPath::kDone_Verb) {
                 std::array<SkPoint, 4> arcPoints;
-                bool insertArc = calculateCornerCurve(
+                bool insertArc = BuildCornerCurve(
                         prevPoints, prevMeasure, curPoints, curMeasure, fRadius, arcPoints);
                 if (addPrevCurve) {
                     if (prevVerb == SkPath::kLine_Verb) {
@@ -246,12 +247,12 @@ public:
                 }
                 if (closed) {
                     std::array<SkPoint, 4> arcPoints;
-                    auto insertArc = calculateCornerCurve(prevPoints,
-                                                          prevMeasure,
-                                                          contourBeginCurvePoints,
-                                                          contourBeginCurveMeasure,
-                                                          fRadius,
-                                                          arcPoints);
+                    auto insertArc = BuildCornerCurve(prevPoints,
+                                                      prevMeasure,
+                                                      contourBeginCurvePoints,
+                                                      contourBeginCurveMeasure,
+                                                      fRadius,
+                                                      arcPoints);
                     if (prevVerb == SkPath::kLine_Verb) {
                         dst->lineTo(prevPoints[3]);
                     } else if (prevVerb == SkPath::kCubic_Verb) {
@@ -301,7 +302,8 @@ private:
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
 sk_sp<SkPathEffect> SkCornerPathEffect::Make(SkScalar radius) {
-    return SkScalarIsFinite(radius) && (radius > 0) ?
-            sk_sp<SkPathEffect>(new SkCornerPathEffectImpl(radius)) : nullptr;
+    return SkScalarIsFinite(radius) && (radius > 0)
+                   ? sk_sp<SkPathEffect>(new SkCornerPathEffectImpl(radius))
+                   : nullptr;
 }
 }  // namespace pk
