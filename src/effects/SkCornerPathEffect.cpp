@@ -31,12 +31,10 @@ float arcCubicBezierHandleLength(SkPoint start,
                                  SkPoint end,
                                  SkVector endTangent) {
     float chordLength = (end - start).length();
-
     float dotProduct = startTangent.dot(endTangent);
     float cosAngle = std::max(-1.0f, std::min(1.0f, dotProduct));
     float angle = std::acos(cosAngle);
     float handleLength = (4.f * (1 - std::cos(angle / 2.f))) / (3 * std::sin(angle / 2.f));
-
     float radius = (chordLength / 2.f) / std::sin(angle / 2.f);
     return handleLength * radius;
 }
@@ -57,7 +55,6 @@ bool calculateCornerCurve(std::array<SkPoint, 4>& startCurve,
     }
 
     auto tangentDistance = calculateTangentDistances(startDir, endDir, radius);
-
     auto startCurveLength = startMeasure->getLength();
     auto startTangentDistance = std::min(tangentDistance, startCurveLength / 2.0f);
     auto endCurveLength = endMeasure->getLength();
@@ -66,9 +63,16 @@ bool calculateCornerCurve(std::array<SkPoint, 4>& startCurve,
 
     SkPoint startTangentPoint;
     SkVector startTangentVector;
-    bool success = startMeasure->getPosTan(
+    bool startSuccess = startMeasure->getPosTan(
             startCurveLength - tangentDistance, &startTangentPoint, &startTangentVector);
-    assert(success);
+    SkPoint endTangentPoint;
+    SkVector endTangentVector;
+    bool endSuccess = endMeasure->getPosTan(tangentDistance, &endTangentPoint, &endTangentVector);
+    if (!startSuccess || !endSuccess) {
+        return false;
+    }
+
+    // modify startCurve
     {
         SkPath startSegment;
         startMeasure->getSegment(0.f, startCurveLength - tangentDistance, &startSegment, false);
@@ -85,10 +89,7 @@ bool calculateCornerCurve(std::array<SkPoint, 4>& startCurve,
         }
     }
 
-    SkPoint endTangentPoint;
-    SkVector endTangentVector;
-    success = endMeasure->getPosTan(tangentDistance, &endTangentPoint, &endTangentVector);
-    assert(success);
+    // modify endCurve
     {
         SkPath endSegment;
         endMeasure->getSegment(tangentDistance, endCurveLength, &endSegment, false);
@@ -105,6 +106,7 @@ bool calculateCornerCurve(std::array<SkPoint, 4>& startCurve,
         }
     }
 
+    // build arc curve
     auto handleLength = arcCubicBezierHandleLength(
             startTangentPoint, startTangentVector, endTangentPoint, endTangentVector);
     arcCurve = {startTangentPoint,
@@ -129,17 +131,17 @@ public:
         }
 
         SkPath::Iter iter(src, false);
-        SkPath::Verb verb;
+        SkPath::Verb verb = SkPath::kDone_Verb;
         std::array<SkPoint, 4> points;
 
         bool closed = false;
-        bool preIsAdd = true;
+        bool addPrevCurve = true;
 
         std::array<SkPoint, 4> curPoints;
-        SkPath::Verb prevVerb = SkPath::kDone_Verb;
-        std::array<SkPoint, 4> prePoints;
-        std::shared_ptr<SkPathMeasure> preMeasure = nullptr;
         std::shared_ptr<SkPathMeasure> curMeasure = nullptr;
+        SkPath::Verb prevVerb = SkPath::kDone_Verb;
+        std::array<SkPoint, 4> prevPoints;
+        std::shared_ptr<SkPathMeasure> prevMeasure = nullptr;
 
         SkPath::Verb contourBeginCurveVerb = SkPath::kDone_Verb;
         std::array<SkPoint, 4> contourBeginCurvePoints;
@@ -160,7 +162,7 @@ public:
                     isInvalidCurve = (curPoints[0] == curPoints[3]);
                     break;
                 case SkPath::kQuad_Verb:
-                    curPoints[0] = prePoints[3];
+                    curPoints[0] = prevPoints[3];
                     curPoints[1] = curPoints[0] + (points[1] - curPoints[0]) * (2.f / 3.f);
                     curPoints[2] = points[2] + (points[1] - points[2]) * (2.f / 3.f);
                     curPoints[3] = points[2];
@@ -168,7 +170,7 @@ public:
                     isInvalidCurve = (curPoints[0] == curPoints[3]);
                     break;
                 case SkPath::kConic_Verb:
-                    curPoints[0] = prePoints[3];
+                    curPoints[0] = prevPoints[3];
                     curPoints[1] = curPoints[0] +
                                    (points[1] - curPoints[0]) * (2.f / 3.f) * iter.conicWeight();
                     curPoints[2] =
@@ -178,7 +180,7 @@ public:
                     isInvalidCurve = (curPoints[0] == curPoints[3]);
                     break;
                 case SkPath::kCubic_Verb:
-                    curPoints[0] = prePoints[3];
+                    curPoints[0] = prevPoints[3];
                     curPoints[1] = points[1];
                     curPoints[2] = points[2];
                     curPoints[3] = points[3];
@@ -197,7 +199,7 @@ public:
             }
             if (verb == SkPath::kMove_Verb) {
                 prevVerb = verb;
-                prePoints = curPoints;
+                prevPoints = curPoints;
                 continue;
             }
             SkPath tempPath;
@@ -210,56 +212,56 @@ public:
             }
             curMeasure = std::make_shared<SkPathMeasure>(tempPath, false, 200);
             if (prevVerb == SkPath::kMove_Verb) {
-                dst->moveTo(prePoints[3]);
+                dst->moveTo(prevPoints[3]);
                 if (closed) {
                     contourBeginCurveVerb = verb;
                     contourBeginCurvePoints = curPoints;
                 }
                 prevVerb = verb;
-                prePoints = curPoints;
-                preIsAdd = !closed;
-                preMeasure = curMeasure;
+                prevPoints = curPoints;
+                addPrevCurve = !closed;
+                prevMeasure = curMeasure;
                 continue;
             }
 
             if (verb != SkPath::kClose_Verb && verb != SkPath::kDone_Verb) {
                 std::array<SkPoint, 4> arcPoints;
                 bool insertArc = calculateCornerCurve(
-                        prePoints, preMeasure, curPoints, curMeasure, fRadius, arcPoints);
-                if (preIsAdd) {
+                        prevPoints, prevMeasure, curPoints, curMeasure, fRadius, arcPoints);
+                if (addPrevCurve) {
                     if (prevVerb == SkPath::kLine_Verb) {
-                        dst->lineTo(prePoints[3]);
+                        dst->lineTo(prevPoints[3]);
                     } else if (prevVerb == SkPath::kCubic_Verb) {
-                        dst->cubicTo(prePoints[1], prePoints[2], prePoints[3]);
+                        dst->cubicTo(prevPoints[1], prevPoints[2], prevPoints[3]);
                     }
                 } else {
-                    contourBeginCurvePoints[2] = prePoints[2];
-                    contourBeginCurvePoints[3] = prePoints[3];
-                    contourBeginCurveMeasure = preMeasure;
-                    dst->moveTo(prePoints[3]);
+                    contourBeginCurvePoints[2] = prevPoints[2];
+                    contourBeginCurvePoints[3] = prevPoints[3];
+                    contourBeginCurveMeasure = prevMeasure;
+                    dst->moveTo(prevPoints[3]);
                 }
                 if (insertArc) {
                     dst->cubicTo(arcPoints[1], arcPoints[2], arcPoints[3]);
                 }
                 prevVerb = verb;
-                prePoints = curPoints;
-                preMeasure = curMeasure;
+                prevPoints = curPoints;
+                prevMeasure = curMeasure;
             } else {
-                if (!preMeasure) {
+                if (!prevMeasure) {
                     return true;
                 }
                 if (closed) {
                     std::array<SkPoint, 4> arcPoints;
-                    auto insertArc = calculateCornerCurve(prePoints,
-                                                          preMeasure,
+                    auto insertArc = calculateCornerCurve(prevPoints,
+                                                          prevMeasure,
                                                           contourBeginCurvePoints,
                                                           contourBeginCurveMeasure,
                                                           fRadius,
                                                           arcPoints);
                     if (prevVerb == SkPath::kLine_Verb) {
-                        dst->lineTo(prePoints[3]);
+                        dst->lineTo(prevPoints[3]);
                     } else if (prevVerb == SkPath::kCubic_Verb) {
-                        dst->cubicTo(prePoints[1], prePoints[2], prePoints[3]);
+                        dst->cubicTo(prevPoints[1], prevPoints[2], prevPoints[3]);
                     }
                     if (insertArc) {
                         dst->cubicTo(arcPoints[1], arcPoints[2], arcPoints[3]);
@@ -274,25 +276,25 @@ public:
                     dst->close();
                 } else {
                     if (prevVerb == SkPath::kLine_Verb) {
-                        dst->lineTo(prePoints[3]);
+                        dst->lineTo(prevPoints[3]);
                     } else if (prevVerb == SkPath::kCubic_Verb) {
-                        dst->cubicTo(prePoints[1], prePoints[2], prePoints[3]);
+                        dst->cubicTo(prevPoints[1], prevPoints[2], prevPoints[3]);
                     }
                 }
                 prevVerb = verb;
-                prePoints = curPoints;
-                preMeasure = nullptr;
+                prevPoints = curPoints;
+                prevMeasure = nullptr;
                 if (verb == SkPath::kDone_Verb) {
                     return true;
                 }
             }
-            preIsAdd = true;
+            addPrevCurve = true;
         }
     }
 
     bool computeFastBounds(SkRect*) const override {
-        // Rounding sharp corners within a path produces a new path that is still contained
-        // within the original's bounds, so leave 'bounds' unmodified.
+        // Rounding sharp corners within a path produces a new path that is still contained within
+        // the original's bounds, so leave 'bounds' unmodified.
         return true;
     }
 
