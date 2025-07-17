@@ -7,12 +7,6 @@
 
 #include "include/effects/SkCornerPathEffect.h"
 #include <include/core/SkPathMeasure.h>
-#include <include/core/SkScalar.h>
-#include <algorithm>
-#include <array>
-#include <cassert>
-#include <cmath>
-#include <memory>
 #include "include/core/SkPath.h"
 #include "include/core/SkPoint.h"
 #include "src/core/SkPathEffectBase.h"
