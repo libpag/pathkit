@@ -161,6 +161,7 @@ public:
         std::shared_ptr<SkPathMeasure> contourBeginCurveMeasure = nullptr;
 
         while (true) {
+            bool isInvalidCurve = false;
             switch (verb = iter.next(points.data())) {
                 case SkPath::kMove_Verb:
                     curPoints[3] = points[0];
@@ -171,6 +172,7 @@ public:
                     curPoints[1] = points[1];
                     curPoints[2] = points[0];
                     curPoints[3] = points[1];
+                    isInvalidCurve = (curPoints[0] == curPoints[3]);
                     break;
                 case SkPath::kQuad_Verb:
                     curPoints[0] = prePoints[3];
@@ -178,6 +180,7 @@ public:
                     curPoints[2] = points[2] + (points[1] - points[2]) * (2.f / 3.f);
                     curPoints[3] = points[2];
                     verb = SkPath::kCubic_Verb;
+                    isInvalidCurve = (curPoints[0] == curPoints[3]);
                     break;
                 case SkPath::kConic_Verb:
                     curPoints[0] = prePoints[3];
@@ -187,12 +190,14 @@ public:
                             points[2] + (points[1] - points[2]) * (2.f / 3.f) * iter.conicWeight();
                     curPoints[3] = points[2];
                     verb = SkPath::kCubic_Verb;
+                    isInvalidCurve = (curPoints[0] == curPoints[3]);
                     break;
                 case SkPath::kCubic_Verb:
                     curPoints[0] = prePoints[3];
                     curPoints[1] = points[1];
                     curPoints[2] = points[2];
                     curPoints[3] = points[3];
+                    isInvalidCurve = (curPoints[0] == curPoints[3]);
                     break;
                 case SkPath::kClose_Verb:
                 case SkPath::kDone_Verb:
@@ -200,6 +205,10 @@ public:
                 default:
                     PkDEBUGFAIL("default should not be reached");
                     return false;
+            }
+            // invalid curves are ignored
+            if (isInvalidCurve) {
+                continue;
             }
             if (verb == SkPath::kMove_Verb) {
                 prevVerb = verb;
