@@ -13,26 +13,11 @@
 #include <cassert>
 #include <cmath>
 #include <memory>
-#include <utility>
 #include "include/core/SkPath.h"
 #include "include/core/SkPoint.h"
 #include "src/core/SkPathEffectBase.h"
 
 namespace pk {
-static bool ComputeStep(const SkPoint& a, const SkPoint& b, SkScalar radius,
-                        SkPoint* step) {
-    SkScalar dist = SkPoint::Distance(a, b);
-
-    *step = b - a;
-    if (dist <= radius * 2) {
-        *step *= PK_ScalarHalf;
-        return false;
-    } else {
-        *step *= radius / dist;
-        return true;
-    }
-}
-
 float calculateTangentDistances(SkVector v1, SkVector v2, float radius) {
     // Calculate the angle between the two vectors
     float dotProduct = v1.dot(v2);
@@ -304,137 +289,6 @@ public:
             preIsAdd = true;
         }
     }
-
-    // bool onFilterPath(SkPath* dst,
-    //                   const SkPath& src,
-    //                   SkStrokeRec*,
-    //                   const SkRect*,
-    //                   const SkMatrix&) const override {
-    //     if (fRadius <= 0) {
-    //         return false;
-    //     }
-
-    //     SkPath::Iter iter(src, false);
-    //     SkPath::Verb verb, prevVerb = SkPath::kDone_Verb;
-    //     SkPoint pts[4];
-
-    //     bool closed;
-    //     SkPoint moveTo, lastCorner;
-    //     SkVector firstStep, step, tempStep;
-    //     bool prevIsValid = true;
-
-    //     // to avoid warnings
-    //     step.set(0, 0);
-    //     moveTo.set(0, 0);
-    //     firstStep.set(0, 0);
-    //     tempStep.set(0, 0);
-    //     lastCorner.set(0, 0);
-    //     SkPath::Verb firstDrawVerb = SkPath::kDone_Verb;
-    //     SkPath::Verb lastDrawVerb = SkPath::kDone_Verb;
-
-    //     for (;;) {
-    //         switch (verb = iter.next(pts)) {
-    //             case SkPath::kMove_Verb:
-    //                 // close out the previous (open) contour
-    //                 if (SkPath::kLine_Verb == prevVerb) {
-    //                     dst->lineTo(lastCorner);
-    //                 }
-    //                 closed = iter.isClosedContour();
-    //                 if (closed) {
-    //                     moveTo = pts[0];
-    //                     prevIsValid = false;
-    //                 } else {
-    //                     dst->moveTo(pts[0]);
-    //                     prevIsValid = true;
-    //                 }
-    //                 break;
-    //             case SkPath::kLine_Verb: {
-    //                 bool drawSegment = ComputeStep(pts[0], pts[1], fRadius, &step);
-    //                 // prev corner
-    //                 if (!prevIsValid) {
-    //                     dst->moveTo(moveTo + step);
-    //                     prevIsValid = true;
-    //                 } else {
-    //                     dst->quadTo(pts[0].fX, pts[0].fY, pts[0].fX + step.fX, pts[0].fY +
-    //                     step.fY);
-    //                 }
-    //                 if (drawSegment) {
-    //                     dst->lineTo(pts[1].fX - step.fX, pts[1].fY - step.fY);
-    //                 }
-    //                 lastCorner = pts[1];
-    //                 prevIsValid = true;
-    //                 break;
-    //             }
-    //             case SkPath::kQuad_Verb:
-    //                 // TBD - just replicate the curve for now
-    //                 if (!prevIsValid) {
-    //                     dst->moveTo(pts[0]);
-    //                     prevIsValid = true;
-    //                 } else {
-    //                     dst->lineTo(pts[0]);
-    //                 }
-    //                 dst->quadTo(pts[1], pts[2]);
-    //                 lastCorner = pts[2];
-    //                 firstStep.set(0, 0);
-    //                 break;
-    //             case SkPath::kConic_Verb:
-    //                 // TBD - just replicate the curve for now
-    //                 if (!prevIsValid) {
-    //                     dst->moveTo(pts[0]);
-    //                     prevIsValid = true;
-    //                 } else {
-    //                     dst->lineTo(pts[0]);
-    //                 }
-    //                 dst->conicTo(pts[1], pts[2], iter.conicWeight());
-    //                 lastCorner = pts[2];
-    //                 firstStep.set(0, 0);
-    //                 break;
-    //             case SkPath::kCubic_Verb:
-    //                 if (!prevIsValid) {
-    //                     dst->moveTo(pts[0]);
-    //                     prevIsValid = true;
-    //                 } else {
-    //                     dst->lineTo(pts[0]);
-    //                 }
-    //                 // TBD - just replicate the curve for now
-    //                 dst->cubicTo(pts[1], pts[2], pts[3]);
-    //                 lastCorner = pts[3];
-    //                 firstStep.set(0, 0);
-    //                 break;
-    //             case SkPath::kClose_Verb:
-    //                 lastDrawVerb = prevVerb;
-    //                 if (firstDrawVerb == SkPath::kLine_Verb && lastDrawVerb ==
-    //                 SkPath::kLine_Verb) {
-    //                     firstStep = tempStep;
-    //                 }
-    //                 if (firstStep.fX || firstStep.fY) {
-    //                     dst->quadTo(lastCorner.fX,
-    //                                 lastCorner.fY,
-    //                                 lastCorner.fX + firstStep.fX,
-    //                                 lastCorner.fY + firstStep.fY);
-    //                 }
-    //                 dst->close();
-    //                 prevIsValid = false;
-    //                 break;
-    //             case SkPath::kDone_Verb:
-    //                 if (prevIsValid) {
-    //                     dst->lineTo(lastCorner);
-    //                 }
-    //                 return true;
-    //             default:
-    //                 PkDEBUGFAIL("default should not be reached");
-    //                 return false;
-    //         }
-
-    //         if (SkPath::kMove_Verb == prevVerb) {
-    //             firstStep = step;
-    //             firstDrawVerb = verb;
-    //             tempStep = firstStep;
-    //         }
-    //         prevVerb = verb;
-    //     }
-    //     return true;
-    // }
 
     bool computeFastBounds(SkRect*) const override {
         // Rounding sharp corners within a path produces a new path that is still contained
