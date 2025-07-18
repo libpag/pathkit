@@ -34,6 +34,10 @@ float ArcCubicBezierHandleLength(SkPoint start,
     return handleLength * radius;
 }
 
+bool SkPointsNearlyEqual(const SkPoint& p1, const SkPoint& p2) {
+    return SkScalarNearlyEqual(p1.fX, p2.fX, 1E-4f) && SkScalarNearlyEqual(p1.fY, p2.fY, 1E-4f);
+}
+
 bool BuildCornerCurve(std::array<SkPoint, 4>& startCurve,
                       const std::shared_ptr<SkPathMeasure>& startMeasure,
                       std::array<SkPoint, 4>& endCurve,
@@ -154,7 +158,7 @@ public:
                     curPoints[1] = points[1];
                     curPoints[2] = points[0];
                     curPoints[3] = points[1];
-                    isInvalidCurve = (curPoints[0] == curPoints[3]);
+                    isInvalidCurve = SkPointsNearlyEqual(curPoints[0], curPoints[3]);
                     break;
                 case SkPath::kQuad_Verb:
                     curPoints[0] = prevPoints[3];
@@ -162,7 +166,7 @@ public:
                     curPoints[2] = points[2] + (points[1] - points[2]) * (2.f / 3.f);
                     curPoints[3] = points[2];
                     verb = SkPath::kCubic_Verb;
-                    isInvalidCurve = (curPoints[0] == curPoints[3]);
+                    isInvalidCurve = SkPointsNearlyEqual(curPoints[0], curPoints[3]);
                     break;
                 case SkPath::kConic_Verb:
                     curPoints[0] = prevPoints[3];
@@ -172,14 +176,14 @@ public:
                             points[2] + (points[1] - points[2]) * (2.f / 3.f) * iter.conicWeight();
                     curPoints[3] = points[2];
                     verb = SkPath::kCubic_Verb;
-                    isInvalidCurve = (curPoints[0] == curPoints[3]);
+                    isInvalidCurve = SkPointsNearlyEqual(curPoints[0], curPoints[3]);
                     break;
                 case SkPath::kCubic_Verb:
                     curPoints[0] = prevPoints[3];
                     curPoints[1] = points[1];
                     curPoints[2] = points[2];
                     curPoints[3] = points[3];
-                    isInvalidCurve = (curPoints[0] == curPoints[3]);
+                    isInvalidCurve = SkPointsNearlyEqual(curPoints[0], curPoints[3]);
                     break;
                 case SkPath::kClose_Verb:
                 case SkPath::kDone_Verb:
