@@ -168,16 +168,17 @@ public:
                     verb = SkPath::kCubic_Verb;
                     isInvalidCurve = SkPointsNearlyEqual(curPoints[0], curPoints[3]);
                     break;
-                case SkPath::kConic_Verb:
+                case SkPath::kConic_Verb: {
                     curPoints[0] = prevPoints[3];
-                    curPoints[1] = curPoints[0] +
-                                   (points[1] - curPoints[0]) * (2.f / 3.f) * iter.conicWeight();
-                    curPoints[2] =
-                            points[2] + (points[1] - points[2]) * (2.f / 3.f) * iter.conicWeight();
+                    float factor = (2.0f / 3.0f) * (iter.conicWeight() /
+                                                    (1.0f + (iter.conicWeight() - 1.0f) / 3.0f));
+                    curPoints[1] = curPoints[0] + (points[1] - curPoints[0]) * factor;
+                    curPoints[2] = points[2] + (points[1] - points[2]) * factor;
                     curPoints[3] = points[2];
                     verb = SkPath::kCubic_Verb;
                     isInvalidCurve = SkPointsNearlyEqual(curPoints[0], curPoints[3]);
                     break;
+                }
                 case SkPath::kCubic_Verb:
                     curPoints[0] = prevPoints[3];
                     curPoints[1] = points[1];
