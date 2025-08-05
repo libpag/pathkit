@@ -10,6 +10,7 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPoint.h"
 #include "src/core/SkPathEffectBase.h"
+#include <array>
 
 namespace pk {
 namespace {
