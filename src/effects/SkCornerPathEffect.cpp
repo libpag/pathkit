@@ -34,11 +34,8 @@ float ArcCubicBezierHandleLength(SkPoint start,
     return handleLength * radius;
 }
 
-constexpr float kNearlyEqualThreshold = 1E-4f;
-
 bool SkPointsNearlyEqual(const SkPoint& p1, const SkPoint& p2) {
-    return SkScalarNearlyEqual(p1.fX, p2.fX, kNearlyEqualThreshold) &&
-           SkScalarNearlyEqual(p1.fY, p2.fY, kNearlyEqualThreshold);
+    return SkScalarNearlyEqual(p1.fX, p2.fX, 1E-4f) && SkScalarNearlyEqual(p1.fY, p2.fY, 1E-4f);
 }
 
 bool BuildCornerCurve(std::array<SkPoint, 4>& startCurve,
@@ -51,8 +48,8 @@ bool BuildCornerCurve(std::array<SkPoint, 4>& startCurve,
     startDir.normalize();
     SkVector endDir = endCurve[1] - endCurve[0];
     endDir.normalize();
-    if (SkScalarNearlyEqual(startDir.fX, -endDir.fX, kNearlyEqualThreshold) &&
-        SkScalarNearlyEqual(startDir.fY, -endDir.fY, kNearlyEqualThreshold)) {
+    if (SkScalarNearlyEqual(startDir.fX, -endDir.fX, 1E-4f) &&
+        SkScalarNearlyEqual(startDir.fY, -endDir.fY, 1E-4f)) {
         return false;
     }
 
@@ -173,10 +170,10 @@ public:
                     break;
                 case SkPath::kConic_Verb: {
                     curPoints[0] = prevPoints[3];
-                    curPoints[1] = curPoints[0] +
-                                   (points[1] - curPoints[0]) * (2.f / 3.f) * iter.conicWeight();
-                    curPoints[2] =
-                            points[2] + (points[1] - points[2]) * (2.f / 3.f) * iter.conicWeight();
+                    float factor = (2.0f / 3.0f) * (iter.conicWeight() /
+                                                    (1.0f + (iter.conicWeight() - 1.0f) / 3.0f));
+                    curPoints[1] = curPoints[0] + (points[1] - curPoints[0]) * factor;
+                    curPoints[2] = points[2] + (points[1] - points[2]) * factor;
                     curPoints[3] = points[2];
                     verb = SkPath::kCubic_Verb;
                     isInvalidCurve = SkPointsNearlyEqual(curPoints[0], curPoints[3]);
