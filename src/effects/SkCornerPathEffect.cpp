@@ -15,8 +15,8 @@ namespace pk {
 namespace {
 float ComputeTangentDistances(SkVector v1, SkVector v2, float radius) {
     // Calculate the angle between the two vectors
-    float dotProduct = v1.dot(v2);
-    float halfAngle = std::acos(dotProduct) / 2.0f;
+    auto dotProduct = v1.dot(v2);
+    auto halfAngle = std::acos(dotProduct) / 2.0f;
     // The distance from the angle center to each tangent point
     return radius / std::tan(halfAngle);
 }
@@ -25,12 +25,12 @@ float ArcCubicBezierHandleLength(SkPoint start,
                                  SkVector startTangent,
                                  SkPoint end,
                                  SkVector endTangent) {
-    float chordLength = (end - start).length();
-    float dotProduct = startTangent.dot(endTangent);
-    float cosAngle = std::max(-1.0f, std::min(1.0f, dotProduct));
-    float angle = std::acos(cosAngle);
-    float handleLength = (4.f * (1 - std::cos(angle / 2.f))) / (3 * std::sin(angle / 2.f));
-    float radius = (chordLength / 2.f) / std::sin(angle / 2.f);
+    auto chordLength = (end - start).length();
+    auto dotProduct = startTangent.dot(endTangent);
+    auto cosAngle = std::max(-1.0f, std::min(1.0f, dotProduct));
+    auto angle = std::acos(cosAngle);
+    auto handleLength = (4.f * (1 - std::cos(angle / 2.f))) / (3 * std::sin(angle / 2.f));
+    auto radius = (chordLength / 2.f) / std::sin(angle / 2.f);
     return handleLength * radius;
 }
 
@@ -44,9 +44,9 @@ bool BuildCornerCurve(std::array<SkPoint, 4>& startCurve,
                       const std::shared_ptr<SkPathMeasure>& endMeasure,
                       SkScalar radius,
                       std::array<SkPoint, 4>& arcCurve) {
-    SkVector startDir = startCurve[2] - startCurve[3];
+    auto startDir = startCurve[2] - startCurve[3];
     startDir.normalize();
-    SkVector endDir = endCurve[1] - endCurve[0];
+    auto endDir = endCurve[1] - endCurve[0];
     endDir.normalize();
     if (SkScalarNearlyEqual(startDir.fX, -endDir.fX, 1E-4f) &&
         SkScalarNearlyEqual(startDir.fY, -endDir.fY, 1E-4f)) {
