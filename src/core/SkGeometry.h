@@ -54,6 +54,16 @@ void SkChopQuadAt(const SkPoint src[3], SkPoint dst[5], SkScalar t);
 void SkChopQuadAtHalf(const SkPoint src[3], SkPoint dst[5]);
 
 
+/** Given the 3 coefficients for a quadratic bezier (either X or Y values), look
+    for extrema, and return the number of t-values that are found that represent
+    these extrema. If the quadratic has no extrema betwee (0..1) exclusive, the
+    function returns 0.
+    Returned count      tValues[]
+    0                   ignored
+    1                   0 < tValues[0] < 1
+*/
+int SkFindQuadExtrema(SkScalar a, SkScalar b, SkScalar c, SkScalar tValues[1]);
+
 /** Given 3 points on a quadratic bezier, chop it into 1, 2 beziers such that
     the resulting beziers are monotonic in Y. This is called by the scan converter.
     Depending on what is returned, dst[] is treated as follows

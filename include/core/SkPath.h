@@ -343,6 +343,25 @@ public:
         return fPathRef->getBounds();
     }
 
+    /** Returns minimum and maximum axes values of the lines and curves in SkPath.
+        Returns (0, 0, 0, 0) if SkPath contains no points.
+        Returned bounds width and height may be larger or smaller than area affected
+        when SkPath is drawn.
+
+        Includes SkPoint associated with kMove_Verb that define empty
+        contours.
+
+        Behaves identically to getBounds() when SkPath contains
+        only lines. If SkPath contains curves, computed bounds includes
+        the maximum extent of the quad, conic, or cubic; is slower than getBounds();
+        and unlike getBounds(), does not cache the result.
+
+        @return  tight bounds of curves in SkPath
+
+        example: https://fiddle.skia.org/c/@Path_computeTightBounds
+    */
+    SkRect computeTightBounds() const;
+
     /** Returns true if rect is contained by SkPath.
         May return false when rect is contained by SkPath.
 

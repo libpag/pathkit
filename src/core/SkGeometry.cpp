@@ -191,6 +191,18 @@ SkVector SkFindBisector(SkVector a, SkVector b) {
     return SkPoint{x0_x1[0] + x0_x1[1], y0_y1[0] + y0_y1[1]};
 }
 
+/** Quad'(t) = At + B, where
+    A = 2(a - 2b + c)
+    B = 2(b - a)
+    Solve for t, only if it fits between 0 < t < 1
+*/
+int SkFindQuadExtrema(SkScalar a, SkScalar b, SkScalar c, SkScalar tValue[1]) {
+    /*  At + B == 0
+        t = -B / A
+    */
+    return valid_unit_divide(a - b, a - b - b + c, tValue);
+}
+
 static inline void flatten_double_quad_extrema(SkScalar coords[14]) {
     coords[2] = coords[6] = coords[4];
 }
