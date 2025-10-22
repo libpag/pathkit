@@ -79,7 +79,9 @@ protected:
     static void SortMesh(VertexList* vertices, const Comparator&);
 
     // 4) Simplify the mesh by inserting new vertices at intersecting edges:
-    enum class SimplifyResult : bool { kAlreadySimple, kFoundSelfIntersection };
+    enum class SimplifyResult {kFailed, kAlreadySimple, kFoundSelfIntersection };
+
+    enum class BoolFail { kFalse, kTrue, kFail };
 
     SimplifyResult simplify(VertexList* mesh, const Comparator&) const;
 
@@ -163,12 +165,12 @@ protected:
                    EdgeList* activeEdges,
                    Vertex** current,
                    const Comparator&) const;
-    void mergeEdgesAbove(Edge* edge,
+    bool mergeEdgesAbove(Edge* edge,
                          Edge* other,
                          EdgeList* activeEdges,
                          Vertex** current,
                          const Comparator&) const;
-    void mergeEdgesBelow(Edge* edge,
+    bool mergeEdgesBelow(Edge* edge,
                          Edge* other,
                          EdgeList* activeEdges,
                          Vertex** current,
@@ -177,27 +179,27 @@ protected:
             Vertex* prev, Vertex* next, EdgeType, const Comparator&, int windingScale = 1) const;
     void mergeVertices(Vertex* src, Vertex* dst, VertexList* mesh, const Comparator&) const;
     static void FindEnclosingEdges(Vertex* v, EdgeList* edges, Edge** left, Edge** right);
-    void mergeCollinearEdges(Edge* edge,
+    bool mergeCollinearEdges(Edge* edge,
                              EdgeList* activeEdges,
                              Vertex** current,
                              const Comparator&) const;
-    bool splitEdge(Edge* edge,
+    BoolFail splitEdge(Edge* edge,
                    Vertex* v,
                    EdgeList* activeEdges,
                    Vertex** current,
                    const Comparator&) const;
-    bool intersectEdgePair(Edge* left,
-                           Edge* right,
-                           EdgeList* activeEdges,
-                           Vertex** current,
-                           const Comparator&) const;
+    BoolFail intersectEdgePair(Edge* left,
+                               Edge* right,
+                               EdgeList* activeEdges,
+                               Vertex** current,
+                               const Comparator&) const;
     Vertex* makeSortedVertex(const SkPoint&,
                              uint8_t alpha,
                              VertexList* mesh,
                              Vertex* reference,
                              const Comparator&) const;
     void computeBisector(Edge* edge1, Edge* edge2, Vertex*) const;
-    bool checkForIntersection(Edge* left,
+    BoolFail checkForIntersection(Edge* left,
                               Edge* right,
                               EdgeList* activeEdges,
                               Vertex** current,
@@ -482,7 +484,7 @@ struct GrTriangulator::EdgeList {
     void insert(Edge* edge, Edge* prev, Edge* next);
     void insert(Edge* edge, Edge* prev);
     void append(Edge* e) { insert(e, fTail, nullptr); }
-    void remove(Edge* edge);
+    bool remove(Edge* edge);
     void removeAll() {
         while (fHead) {
             this->remove(fHead);
