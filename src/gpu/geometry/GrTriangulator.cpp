@@ -825,6 +825,7 @@ bool GrTriangulator::setTop(
         return false;
     }
     this->mergeCollinearEdges(edge, activeEdges, current, c);
+    return true;
 }
 
 bool GrTriangulator::setBottom(
@@ -841,6 +842,7 @@ bool GrTriangulator::setBottom(
         return false;
     }
     this->mergeCollinearEdges(edge, activeEdges, current, c);
+    return true;
 }
 
 bool GrTriangulator::mergeEdgesAbove(Edge* edge,
