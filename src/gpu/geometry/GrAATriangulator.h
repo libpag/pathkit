@@ -24,6 +24,9 @@ public:
         aaTriangulator.fEmitCoverage = true;
         bool isLinear;
         Poly* polys = aaTriangulator.pathToPolys(tolerance, clipBounds, &isLinear);
+        if (!polys) {
+            return 0;
+        }
         return aaTriangulator.polysToAATriangles(polys, vertex);
     }
 

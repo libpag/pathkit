@@ -36,6 +36,9 @@ public:
         SkArenaAlloc alloc(kArenaDefaultChunkSize);
         GrTriangulator triangulator(path, &alloc);
         Poly* polys = triangulator.pathToPolys(tolerance, clipBounds, isLinear);
+        if (!polys) {
+            return 0;
+        }
         return triangulator.polysToTriangles(polys, vertex);
     }
 
