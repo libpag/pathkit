@@ -1457,6 +1457,11 @@ GrTriangulator::SimplifyResult GrTriangulator::simplify(VertexList* mesh,
                             continue;
                         }
                     }
+
+                    // Either l or r are true.
+                    result = SimplifyResult::kFoundSelfIntersection;
+                    restartChecks = true;
+                    break;
                 }
             } else {
                 BoolFail bf = this->checkForIntersection(
