@@ -155,12 +155,12 @@ protected:
                              int pointsLeft) const;
     bool applyFillType(int winding) const;
     Edge* makeEdge(Vertex* prev, Vertex* next, EdgeType type, const Comparator&) const;
-    void setTop(Edge* edge,
+    bool setTop(Edge* edge,
                 Vertex* v,
                 EdgeList* activeEdges,
                 Vertex** current,
                 const Comparator&) const;
-    void setBottom(Edge* edge,
+    bool setBottom(Edge* edge,
                    Vertex* v,
                    EdgeList* activeEdges,
                    Vertex** current,
