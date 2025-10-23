@@ -485,7 +485,7 @@ struct GrTriangulator::EdgeList {
     Edge* fHead;
     Edge* fTail;
     void insert(Edge* edge, Edge* prev, Edge* next);
-    void insert(Edge* edge, Edge* prev);
+    bool insert(Edge* edge, Edge* prev);
     void append(Edge* e) { insert(e, fTail, nullptr); }
     bool remove(Edge* edge);
     void removeAll() {

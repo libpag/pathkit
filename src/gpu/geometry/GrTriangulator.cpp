@@ -7,6 +7,7 @@
 
 #include "src/gpu/geometry/GrTriangulator.h"
 
+#include "include/core/SkScalar.h"
 #include "src/gpu/geometry/GrPathUtils.h"
 
 #include "include/private/SkTPin.h"
@@ -69,11 +70,11 @@ template <class T, T* T::* Prev, T* T::* Next> static void list_remove(T* t, T**
 typedef bool (*CompareFunc)(const SkPoint& a, const SkPoint& b);
 
 static bool sweep_lt_horiz(const SkPoint& a, const SkPoint& b) {
-    return a.fX < b.fX || (a.fX == b.fX && a.fY > b.fY);
+    return a.fX < b.fX || (a.fX == b.fX && !SkScalarNearlyEqual(a.fY, b.fY) && a.fY > b.fY);
 }
 
 static bool sweep_lt_vert(const SkPoint& a, const SkPoint& b) {
-    return a.fY < b.fY || (a.fY == b.fY && a.fX < b.fX);
+    return a.fY < b.fY || (a.fY == b.fY && !SkScalarNearlyEqual(a.fX, b.fX) && a.fX < b.fX);
 }
 
 bool GrTriangulator::Comparator::sweep_lt(const SkPoint& a, const SkPoint& b) const {
@@ -641,10 +642,14 @@ Edge* GrTriangulator::makeEdge(Vertex* prev,
     return fAlloc->make<Edge>(top, bottom, winding, type);
 }
 
-void EdgeList::insert(Edge* edge, Edge* prev) {
+bool EdgeList::insert(Edge* edge, Edge* prev) {
     TESS_LOG("inserting edge %g -> %g\n", edge->fTop->fID, edge->fBottom->fID);
+    if (this->contains(edge)) {
+        return false;
+    }
     Edge* next = prev ? prev->fRight : fHead;
     this->insert(edge, prev, next);
+    return true;
 }
 
 void GrTriangulator::FindEnclosingEdges(Vertex* v, EdgeList* edges, Edge** left, Edge** right) {
@@ -737,7 +742,9 @@ static bool rewind(EdgeList* activeEdges, Vertex** current, Vertex* dst, const C
         }
         Edge* leftEdge = v->fLeftEnclosingEdge;
         for (Edge* e = v->fFirstEdgeAbove; e; e = e->fNextEdgeAbove) {
-            activeEdges->insert(e, leftEdge);
+            if (!activeEdges->insert(e, leftEdge)) {
+                return false;
+            }
             leftEdge = e;
             Vertex* top = e->fTop;
             if (c.sweep_lt(top->fPoint, dst->fPoint) &&
