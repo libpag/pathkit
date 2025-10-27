@@ -7,7 +7,6 @@
 
 #include "src/gpu/geometry/GrTriangulator.h"
 
-#include "include/core/SkScalar.h"
 #include "src/gpu/geometry/GrPathUtils.h"
 
 #include "include/private/SkTPin.h"
@@ -15,8 +14,6 @@
 #include "src/core/SkPointPriv.h"
 
 #include <algorithm>
-#include <cstdint>
-#include <iostream>
 
 #if TRIANGULATOR_LOGGING
 #define TESS_LOG printf
@@ -1682,7 +1679,10 @@ Poly* GrTriangulator::contoursToPolys(VertexList* contours, int contourCnt) {
     this->mergeCoincidentVertices(&mesh, c);
     TESS_LOG("\nsorted+merged mesh:\n");
     DUMP_MESH(mesh);
-    this->simplify(&mesh, c);
+    auto result = this->simplify(&mesh, c);
+    if (result == SimplifyResult::kFailed) {
+        return nullptr;
+    }
     TESS_LOG("\nsimplified mesh:\n");
     DUMP_MESH(mesh);
     return this->tessellate(mesh, c);

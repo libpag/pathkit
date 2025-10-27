@@ -684,6 +684,9 @@ Poly* GrAATriangulator::tessellate(const VertexList& mesh, const Comparator& c) 
         DUMP_MESH(aaMesh);
         this->mergeCoincidentVertices(&aaMesh, c);
         result = this->simplify(&aaMesh, c);
+        if (result == SimplifyResult::kFailed) {
+            return nullptr;
+        }
         TESS_LOG("combined and simplified mesh:\n");
         DUMP_MESH(aaMesh);
         fOuterMesh.fHead = fOuterMesh.fTail = nullptr;

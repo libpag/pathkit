@@ -104,7 +104,7 @@ bool SkPaint::getFillPath(const SkPath& src,
 
     if (!rec.applyToPath(dst, *srcPtr)) {
         if (srcPtr == &tmpPath) {
-            // If path's were copy-on-write, this trick would not be needed.p
+            // If path's were copy-on-write, this trick would not be needed.
             // As it is, we want to save making a deep-copy from tmpPath -> dst
             // since we know we're just going to delete tmpPath when we return,
             // so the swap saves that copy.
