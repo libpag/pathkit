@@ -35,7 +35,10 @@ public:
         }
         SkArenaAlloc alloc(kArenaDefaultChunkSize);
         GrTriangulator triangulator(path, &alloc);
-        Poly* polys = triangulator.pathToPolys(tolerance, clipBounds, isLinear);
+        auto [polys, success] = triangulator.pathToPolys(tolerance, clipBounds, isLinear);
+        if (!success) {
+            return 0;
+        }
         return triangulator.polysToTriangles(polys, vertex);
     }
 
@@ -66,10 +69,7 @@ protected:
                         bool* isLinear) const;
 
     // 2) Build a mesh of edges connecting the vertices:
-    void contoursToMesh(VertexList* contours,
-                        int contourCnt,
-                        VertexList* mesh,
-                        const Comparator&) const;
+    void contoursToMesh(VertexList* contours, int contourCnt, VertexList* mesh, const Comparator&);
 
     // 3) Sort the vertices in Y (and secondarily in X):
     static void SortedMerge(VertexList* front,
@@ -79,12 +79,14 @@ protected:
     static void SortMesh(VertexList* vertices, const Comparator&);
 
     // 4) Simplify the mesh by inserting new vertices at intersecting edges:
-    enum class SimplifyResult : bool { kAlreadySimple, kFoundSelfIntersection };
+    enum class SimplifyResult {kFailed, kAlreadySimple, kFoundSelfIntersection };
 
-    SimplifyResult simplify(VertexList* mesh, const Comparator&) const;
+    enum class BoolFail { kFalse, kTrue, kFail };
+
+    SimplifyResult simplify(VertexList* mesh, const Comparator&);
 
     // 5) Tessellate the simplified mesh into monotone polygons:
-    virtual Poly* tessellate(const VertexList& vertices, const Comparator&) const;
+    virtual std::tuple<Poly*, bool> tessellate(const VertexList& vertices, const Comparator&);
 
     // 6) Triangulate the monotone polygons directly into a vertex buffer:
     void polysToTriangles(Poly* polys,
@@ -152,71 +154,64 @@ protected:
                              VertexList* contour,
                              int pointsLeft) const;
     bool applyFillType(int winding) const;
-    Edge* makeEdge(Vertex* prev, Vertex* next, EdgeType type, const Comparator&) const;
-    void setTop(Edge* edge,
+    Edge* allocateEdge(Vertex* top, Vertex* bottom, int winding, EdgeType type);
+    Edge* makeEdge(Vertex* prev, Vertex* next, EdgeType type, const Comparator&);
+    bool setTop(Edge* edge,
                 Vertex* v,
                 EdgeList* activeEdges,
                 Vertex** current,
                 const Comparator&) const;
-    void setBottom(Edge* edge,
+    bool setBottom(Edge* edge,
                    Vertex* v,
                    EdgeList* activeEdges,
                    Vertex** current,
                    const Comparator&) const;
-    void mergeEdgesAbove(Edge* edge,
+    bool mergeEdgesAbove(Edge* edge,
                          Edge* other,
                          EdgeList* activeEdges,
                          Vertex** current,
                          const Comparator&) const;
-    void mergeEdgesBelow(Edge* edge,
+    bool mergeEdgesBelow(Edge* edge,
                          Edge* other,
                          EdgeList* activeEdges,
                          Vertex** current,
                          const Comparator&) const;
     Edge* makeConnectingEdge(
-            Vertex* prev, Vertex* next, EdgeType, const Comparator&, int windingScale = 1) const;
+            Vertex* prev, Vertex* next, EdgeType, const Comparator&, int windingScale = 1);
     void mergeVertices(Vertex* src, Vertex* dst, VertexList* mesh, const Comparator&) const;
     static void FindEnclosingEdges(Vertex* v, EdgeList* edges, Edge** left, Edge** right);
-    void mergeCollinearEdges(Edge* edge,
+    bool mergeCollinearEdges(Edge* edge,
                              EdgeList* activeEdges,
                              Vertex** current,
                              const Comparator&) const;
-    bool splitEdge(Edge* edge,
-                   Vertex* v,
-                   EdgeList* activeEdges,
-                   Vertex** current,
-                   const Comparator&) const;
-    bool intersectEdgePair(Edge* left,
-                           Edge* right,
-                           EdgeList* activeEdges,
-                           Vertex** current,
-                           const Comparator&) const;
+    BoolFail splitEdge(
+            Edge* edge, Vertex* v, EdgeList* activeEdges, Vertex** current, const Comparator&);
+    BoolFail intersectEdgePair(
+            Edge* left, Edge* right, EdgeList* activeEdges, Vertex** current, const Comparator&);
     Vertex* makeSortedVertex(const SkPoint&,
                              uint8_t alpha,
                              VertexList* mesh,
                              Vertex* reference,
                              const Comparator&) const;
     void computeBisector(Edge* edge1, Edge* edge2, Vertex*) const;
-    bool checkForIntersection(Edge* left,
-                              Edge* right,
-                              EdgeList* activeEdges,
-                              Vertex** current,
-                              VertexList* mesh,
-                              const Comparator&) const;
+    BoolFail checkForIntersection(Edge* left,
+                                  Edge* right,
+                                  EdgeList* activeEdges,
+                                  Vertex** current,
+                                  VertexList* mesh,
+                                  const Comparator&);
     void sanitizeContours(VertexList* contours, int contourCnt) const;
     bool mergeCoincidentVertices(VertexList* mesh, const Comparator&) const;
-    void buildEdges(VertexList* contours,
-                    int contourCnt,
-                    VertexList* mesh,
-                    const Comparator&) const;
-    Poly* contoursToPolys(VertexList* contours, int contourCnt) const;
-    Poly* pathToPolys(float tolerance, const SkRect& clipBounds, bool* isLinear) const;
+    void buildEdges(VertexList* contours, int contourCnt, VertexList* mesh, const Comparator&);
+    std::tuple<Poly*, bool> contoursToPolys(VertexList* contours, int contourCnt);
+    std::tuple<Poly*, bool> pathToPolys(float tolerance, const SkRect& clipBounds, bool* isLinear);
     static int64_t CountPoints(Poly* polys, SkPathFillType overrideFillType);
     int polysToTriangles(Poly*, std::vector<float>*) const;
 
     // FIXME: fPath should be plumbed through function parameters instead.
     const SkPath fPath;
     SkArenaAlloc* const fAlloc;
+    int fNumEdges = 0;
 
     // Internal control knobs.
     bool fRoundVerticesToQuarterPixel = false;
@@ -480,9 +475,9 @@ struct GrTriangulator::EdgeList {
     Edge* fHead;
     Edge* fTail;
     void insert(Edge* edge, Edge* prev, Edge* next);
-    void insert(Edge* edge, Edge* prev);
+    bool insert(Edge* edge, Edge* prev);
     void append(Edge* e) { insert(e, fTail, nullptr); }
-    void remove(Edge* edge);
+    bool remove(Edge* edge);
     void removeAll() {
         while (fHead) {
             this->remove(fHead);
