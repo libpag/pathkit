@@ -35,8 +35,8 @@ public:
         }
         SkArenaAlloc alloc(kArenaDefaultChunkSize);
         GrTriangulator triangulator(path, &alloc);
-        Poly* polys = triangulator.pathToPolys(tolerance, clipBounds, isLinear);
-        if (!polys) {
+        auto [polys, success] = triangulator.pathToPolys(tolerance, clipBounds, isLinear);
+        if (!success) {
             return 0;
         }
         return triangulator.polysToTriangles(polys, vertex);
@@ -86,7 +86,7 @@ protected:
     SimplifyResult simplify(VertexList* mesh, const Comparator&);
 
     // 5) Tessellate the simplified mesh into monotone polygons:
-    virtual Poly* tessellate(const VertexList& vertices, const Comparator&);
+    virtual std::tuple<Poly*, bool> tessellate(const VertexList& vertices, const Comparator&);
 
     // 6) Triangulate the monotone polygons directly into a vertex buffer:
     void polysToTriangles(Poly* polys,
@@ -203,8 +203,8 @@ protected:
     void sanitizeContours(VertexList* contours, int contourCnt) const;
     bool mergeCoincidentVertices(VertexList* mesh, const Comparator&) const;
     void buildEdges(VertexList* contours, int contourCnt, VertexList* mesh, const Comparator&);
-    Poly* contoursToPolys(VertexList* contours, int contourCnt);
-    Poly* pathToPolys(float tolerance, const SkRect& clipBounds, bool* isLinear);
+    std::tuple<Poly*, bool> contoursToPolys(VertexList* contours, int contourCnt);
+    std::tuple<Poly*, bool> pathToPolys(float tolerance, const SkRect& clipBounds, bool* isLinear);
     static int64_t CountPoints(Poly* polys, SkPathFillType overrideFillType);
     int polysToTriangles(Poly*, std::vector<float>*) const;
 

@@ -23,8 +23,8 @@ public:
         aaTriangulator.fRoundVerticesToQuarterPixel = true;
         aaTriangulator.fEmitCoverage = true;
         bool isLinear;
-        Poly* polys = aaTriangulator.pathToPolys(tolerance, clipBounds, &isLinear);
-        if (!polys) {
+        auto [polys, success] = aaTriangulator.pathToPolys(tolerance, clipBounds, &isLinear);
+        if (!success) {
             return 0;
         }
         return aaTriangulator.polysToAATriangles(polys, vertex);
@@ -69,7 +69,7 @@ private:
     void strokeBoundary(EdgeList* boundary, VertexList* innerMesh, const Comparator&);
 
     // Run steps 3-6 above on the new mesh, and produce antialiased triangles.
-    Poly* tessellate(const VertexList& mesh, const Comparator&) override;
+    std::tuple<Poly*, bool> tessellate(const VertexList& mesh, const Comparator&) override;
     int polysToAATriangles(Poly*, std::vector<float>*) const;
 
     // Additional helpers and driver functions.

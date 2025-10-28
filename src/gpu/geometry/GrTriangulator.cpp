@@ -1512,7 +1512,7 @@ GrTriangulator::SimplifyResult GrTriangulator::simplify(VertexList* mesh, const 
 
 // Stage 5: Tessellate the simplified mesh into monotone polygons.
 
-Poly* GrTriangulator::tessellate(const VertexList& vertices, const Comparator&) {
+std::tuple<Poly*, bool> GrTriangulator::tessellate(const VertexList& vertices, const Comparator&) {
     TESS_LOG("\ntessellating simple polygons\n");
     EdgeList activeEdges;
     Poly* polys = nullptr;
@@ -1624,7 +1624,7 @@ Poly* GrTriangulator::tessellate(const VertexList& vertices, const Comparator&) 
         }
 #endif
     }
-    return polys;
+    return {polys, true};
 }
 
 // This is a driver function that calls stages 2-5 in turn.
@@ -1665,7 +1665,7 @@ void GrTriangulator::SortMesh(VertexList* vertices, const Comparator& c) {
 #endif
 }
 
-Poly* GrTriangulator::contoursToPolys(VertexList* contours, int contourCnt) {
+std::tuple<Poly*, bool> GrTriangulator::contoursToPolys(VertexList* contours, int contourCnt) {
     const SkRect& pathBounds = fPath.getBounds();
     Comparator c(pathBounds.width() > pathBounds.height() ? Comparator::Direction::kHorizontal
                                                           : Comparator::Direction::kVertical);
@@ -1681,7 +1681,7 @@ Poly* GrTriangulator::contoursToPolys(VertexList* contours, int contourCnt) {
     DUMP_MESH(mesh);
     auto result = this->simplify(&mesh, c);
     if (result == SimplifyResult::kFailed) {
-        return nullptr;
+        return {nullptr, false};
     }
     TESS_LOG("\nsimplified mesh:\n");
     DUMP_MESH(mesh);
@@ -1733,11 +1733,13 @@ static int get_contour_count(const SkPath& path, SkScalar tolerance) {
     return contourCnt;
 }
 
-Poly* GrTriangulator::pathToPolys(float tolerance, const SkRect& clipBounds, bool* isLinear) {
+std::tuple<Poly*, bool> GrTriangulator::pathToPolys(float tolerance,
+                                                    const SkRect& clipBounds,
+                                                    bool* isLinear) {
     int contourCnt = get_contour_count(fPath, tolerance);
     if (contourCnt <= 0) {
         *isLinear = true;
-        return nullptr;
+        return {nullptr, true};
     }
 
     if (SkPathFillType_IsInverse(fPath.getFillType())) {

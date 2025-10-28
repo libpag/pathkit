@@ -645,7 +645,7 @@ void GrAATriangulator::extractBoundaries(const VertexList& inMesh,
     }
 }
 
-Poly* GrAATriangulator::tessellate(const VertexList& mesh, const Comparator& c) {
+std::tuple<Poly*, bool> GrAATriangulator::tessellate(const VertexList& mesh, const Comparator& c) {
     VertexList innerMesh;
     this->extractBoundaries(mesh, &innerMesh, c);
     SortMesh(&innerMesh, c);
@@ -654,12 +654,12 @@ Poly* GrAATriangulator::tessellate(const VertexList& mesh, const Comparator& c) 
     bool was_complex = this->mergeCoincidentVertices(&fOuterMesh, c);
     auto result = this->simplify(&innerMesh, c);
     if (result == SimplifyResult::kFailed) {
-        return nullptr;
+        return {nullptr, false};
     }
     was_complex = (SimplifyResult::kFoundSelfIntersection == result) || was_complex;
     result = this->simplify(&fOuterMesh, c);
     if (result == SimplifyResult::kFailed) {
-        return nullptr;
+        return {nullptr, false};
     }
     was_complex = (SimplifyResult::kFoundSelfIntersection == result) || was_complex;
     TESS_LOG("\ninner mesh before:\n");
@@ -685,7 +685,7 @@ Poly* GrAATriangulator::tessellate(const VertexList& mesh, const Comparator& c) 
         this->mergeCoincidentVertices(&aaMesh, c);
         result = this->simplify(&aaMesh, c);
         if (result == SimplifyResult::kFailed) {
-            return nullptr;
+            return {nullptr, false};
         }
         TESS_LOG("combined and simplified mesh:\n");
         DUMP_MESH(aaMesh);
