@@ -12,7 +12,7 @@
 #include "include/private/SkTo.h"
 #include "src/core/SkPaintDefaults.h"
 #include "src/core/SkPathPriv.h"
-#include "src/core/SkPathStroker.h"
+#include "include/core/SkPathStroker.h"
 
 namespace pk {
 
