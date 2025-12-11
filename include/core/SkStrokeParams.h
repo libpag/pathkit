@@ -36,11 +36,14 @@ struct SkStrokeParams {
     bool operator!=(const SkStrokeParams& other) const { return !(*this == other); }
 };
 
-bool StrokePath(const SkPath& src,
-                SkPath* dst,
-                SkScalar width,
-                const std::vector<SkStrokeParams>& params,
-                SkScalar resScale);
+// Apply stroke with multiple parameters to a path
+// Each points can have different stroke parameters (miter limit, cap, join)
+// If params are fewer than segments, they will be cycled through
+bool StrokePathWithMultiParams(const SkPath& src,
+                               SkPath* dst,
+                               SkScalar width,
+                               const std::vector<SkStrokeParams>& params,
+                               SkScalar resScale);
 
 }  // namespace pk
 

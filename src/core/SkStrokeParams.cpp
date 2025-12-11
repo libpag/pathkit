@@ -13,11 +13,11 @@
 
 namespace pk {
 
-bool StrokePath(const SkPath& src,
-                SkPath* dst,
-                SkScalar width,
-                const std::vector<SkStrokeParams>& params,
-                SkScalar resScale) {
+bool StrokePathWithMultiParams(const SkPath& src,
+                               SkPath* dst,
+                               SkScalar width,
+                               const std::vector<SkStrokeParams>& params,
+                               SkScalar resScale) {
     if (params.empty()) {
         return false;
     }
