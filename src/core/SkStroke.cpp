@@ -12,7 +12,7 @@
 #include "include/private/SkTo.h"
 #include "src/core/SkPaintDefaults.h"
 #include "src/core/SkPathPriv.h"
-#include "include/core/SkPathStroker.h"
+#include "src/core/SkPathStroker.h"
 
 namespace pk {
 
@@ -45,32 +45,6 @@ void SkStroke::setJoin(SkPaint::Join join) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-// If src==dst, then we use a tmp path to record the stroke, and then swap
-// its contents with src when we're done.
-class AutoTmpPath {
-public:
-    AutoTmpPath(const SkPath& src, SkPath** dst) : fSrc(src) {
-        if (&src == *dst) {
-            *dst = &fTmpDst;
-            fSwapWithSrc = true;
-        } else {
-            (*dst)->reset();
-            fSwapWithSrc = false;
-        }
-    }
-
-    ~AutoTmpPath() {
-        if (fSwapWithSrc) {
-            fTmpDst.swap(*const_cast<SkPath*>(&fSrc));
-        }
-    }
-
-private:
-    SkPath          fTmpDst;
-    const SkPath&   fSrc;
-    bool            fSwapWithSrc;
-};
 
 void SkStroke::strokePath(const SkPath& src, SkPath* dst) const {
 

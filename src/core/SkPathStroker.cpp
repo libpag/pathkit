@@ -5,7 +5,7 @@
  * found in the LICENSE file.
  */
 
-#include "include/core/SkPathStroker.h"
+#include "src/core/SkPathStroker.h"
 
 #include <utility>
 
