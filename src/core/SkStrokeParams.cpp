@@ -8,7 +8,6 @@
 #include "include/core/SkStrokeParams.h"
 
 #include "include/core/SkPath.h"
-#include "src/core/SkPathPriv.h"
 #include "src/core/SkPathStroker.h"
 
 namespace pk {
@@ -29,12 +28,7 @@ bool StrokePathWithMultiParams(const SkPath& src,
         return false;
     }
 
-    // We can always ignore centers for stroke and fill convex line-only paths
-    // TODO: remove the line-only restriction
-    bool ignoreCenter = (src.getSegmentMasks() == SkPath::kLine_SegmentMask) &&
-                        src.isLastContourClosed() && src.isConvex();
-
-    SkPathStroker stroker(src, radius, resScale, ignoreCenter);
+    SkPathStroker stroker(src, radius, resScale, false);
     SkPath::Iter iter(src, false);
     SkPath::Verb lastSegment = SkPath::kMove_Verb;
 
