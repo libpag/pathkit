@@ -47,7 +47,12 @@ bool StrokePathWithMultiParams(const SkPath& src,
 
         switch (verb) {
             case SkPath::kMove_Verb:
-                stroker.moveTo(pts[0]);
+                if (stroker.segmentCount() > 0) {
+                    stroker.moveTo(pts[0], getCurrentParams());
+                    segmentIndex++;
+                } else {
+                    stroker.moveTo(pts[0]);
+                }
                 break;
             case SkPath::kLine_Verb:
                 stroker.lineTo(pts[1], getCurrentParams(), &iter);

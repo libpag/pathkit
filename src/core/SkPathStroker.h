@@ -51,7 +51,7 @@ public:
     bool hasOnlyMoveTo() const { return 0 == fSegmentCount; }
     SkPoint moveToPt() const { return fFirstPt; }
 
-    void moveTo(const SkPoint&);
+    void moveTo(const SkPoint&, const SkStrokeParams& params = SkStrokeParams());
     void lineTo(const SkPoint&, const SkStrokeParams& params, const SkPath::Iter* iter = nullptr);
     void quadTo(const SkPoint&, const SkPoint&, const SkStrokeParams& params);
     void conicTo(const SkPoint&, const SkPoint&, SkScalar weight, const SkStrokeParams& params);
@@ -71,6 +71,8 @@ public:
         return fInner.isZeroLengthSincePoint(0) &&
                fOuter.isZeroLengthSincePoint(fFirstOuterPtIndexInContour);
     }
+
+    int segmentCount() const { return fSegmentCount; }
 
 private:
     SkScalar fRadius;

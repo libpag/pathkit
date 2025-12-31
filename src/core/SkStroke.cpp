@@ -85,7 +85,7 @@ void SkStroke::strokePath(const SkPath& src, SkPath* dst) const {
         SkPoint  pts[4];
         switch (iter.next(pts)) {
             case SkPath::kMove_Verb:
-                stroker.moveTo(pts[0]);
+                stroker.moveTo(pts[0], params);
                 break;
             case SkPath::kLine_Verb:
                 stroker.lineTo(pts[1], params, &iter);

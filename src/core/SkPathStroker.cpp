@@ -268,10 +268,10 @@ SkPathStroker::SkPathStroker(const SkPath& src, SkScalar radius, SkScalar resSca
     fRecursionDepth = 0;
 }
 
-void SkPathStroker::moveTo(const SkPoint& pt) {
+void SkPathStroker::moveTo(const SkPoint& pt, const SkStrokeParams& params) {
     if (fSegmentCount > 0) {
         // Use saved params for finishing previous contour
-        this->finishContour(false, false, fPrevParams);
+        this->finishContour(false, false, params);
     }
     fSegmentCount = 0;
     fFirstPt = fPrevPt = pt;
