@@ -121,11 +121,8 @@ class SkCornerPathEffectImpl : public SkPathEffectBase {
 public:
     explicit SkCornerPathEffectImpl(SkScalar radius) : fRadius(radius) {}
 
-    bool onFilterPath(SkPath* dst,
-                      const SkPath& src,
-                      SkStrokeRec*,
-                      const SkRect*,
-                      const SkMatrix&) const override {
+    bool onFilterPathOld(
+            SkPath* dst, const SkPath& src, SkStrokeRec*, const SkRect*, const SkMatrix&) const {
         if (fRadius <= 0) {
             return false;
         }
@@ -293,6 +290,129 @@ public:
         }
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////
+
+    // 新实现：按轮廓分离处理
+    bool onFilterPath(SkPath* dst,
+                      const SkPath& src,
+                      SkStrokeRec*,
+                      const SkRect*,
+                      const SkMatrix&) const override {
+        if (fRadius <= 0) {
+            return false;
+        }
+
+        // 直接提取曲线段，按轮廓分离
+        SkPath::Iter iter(src, false);
+        SkPath::Verb verb;
+        std::array<SkPoint, 4> points;
+        std::array<SkPoint, 4> prevPoints;
+
+        std::vector<CurveSegment> currentContourCurves;
+        bool hasMove = false;
+
+        while ((verb = iter.next(points.data())) != SkPath::kDone_Verb) {
+            if (verb == SkPath::kMove_Verb) {
+                // 处理前一个轮廓
+                if (hasMove && !currentContourCurves.empty()) {
+                    ProcessContourCurves(currentContourCurves, false, dst);
+                    currentContourCurves.clear();
+                }
+                // 记录新轮廓的起点
+                prevPoints[3] = points[0];
+                hasMove = true;
+                continue;
+            }
+
+            if (verb == SkPath::kClose_Verb) {
+                // 处理闭合轮廓
+                if (!currentContourCurves.empty()) {
+                    ProcessContourCurves(currentContourCurves, true, dst);
+                    currentContourCurves.clear();
+                }
+                hasMove = false;
+                continue;
+            }
+
+            // 提取并归一化曲线段
+            CurveSegment segment;
+            segment.verb = verb;
+            bool isInvalidCurve = false;
+
+            switch (verb) {
+                case SkPath::kLine_Verb:
+                    segment.points[0] = points[0];
+                    segment.points[1] = points[1];
+                    segment.points[2] = points[0];
+                    segment.points[3] = points[1];
+                    isInvalidCurve = SkPointsNearlyEqual(segment.points[0], segment.points[3]);
+                    break;
+
+                case SkPath::kQuad_Verb:
+                    // 二次贝塞尔曲线升阶为三次
+                    segment.points[0] = prevPoints[3];
+                    segment.points[1] =
+                            segment.points[0] + (points[1] - segment.points[0]) * (2.f / 3.f);
+                    segment.points[2] = points[2] + (points[1] - points[2]) * (2.f / 3.f);
+                    segment.points[3] = points[2];
+                    segment.verb = SkPath::kCubic_Verb;
+                    isInvalidCurve = SkPointsNearlyEqual(segment.points[0], segment.points[3]);
+                    break;
+
+                case SkPath::kConic_Verb: {
+                    // 圆锥曲线转换为三次贝塞尔曲线
+                    segment.points[0] = prevPoints[3];
+                    float factor = (2.0f / 3.0f) * (iter.conicWeight() /
+                                                    (1.0f + (iter.conicWeight() - 1.0f) / 3.0f));
+                    segment.points[1] =
+                            segment.points[0] + (points[1] - segment.points[0]) * factor;
+                    segment.points[2] = points[2] + (points[1] - points[2]) * factor;
+                    segment.points[3] = points[2];
+                    segment.verb = SkPath::kCubic_Verb;
+                    isInvalidCurve = SkPointsNearlyEqual(segment.points[0], segment.points[3]);
+                    break;
+                }
+
+                case SkPath::kCubic_Verb:
+                    segment.points[0] = prevPoints[3];
+                    segment.points[1] = points[1];
+                    segment.points[2] = points[2];
+                    segment.points[3] = points[3];
+                    isInvalidCurve = SkPointsNearlyEqual(segment.points[0], segment.points[3]);
+                    break;
+
+                default:
+                    continue;
+            }
+
+            // 跳过退化曲线
+            if (isInvalidCurve) {
+                continue;
+            }
+
+            // 创建 SkPathMeasure 用于测量曲线长度
+            SkPath tempPath;
+            if (segment.verb == SkPath::kLine_Verb) {
+                tempPath.moveTo(segment.points[0]);
+                tempPath.lineTo(segment.points[3]);
+            } else if (segment.verb == SkPath::kCubic_Verb) {
+                tempPath.moveTo(segment.points[0]);
+                tempPath.cubicTo(segment.points[1], segment.points[2], segment.points[3]);
+            }
+            segment.measure = std::make_shared<SkPathMeasure>(tempPath, false, 10.f);
+
+            currentContourCurves.push_back(segment);
+            prevPoints = segment.points;
+        }
+
+        // 处理最后一个轮廓（开放路径）
+        if (hasMove && !currentContourCurves.empty()) {
+            ProcessContourCurves(currentContourCurves, false, dst);
+        }
+
+        return true;
+    }
+
     bool computeFastBounds(SkRect*) const override {
         // Rounding sharp corners within a path produces a new path that is still contained within
         // the original's bounds, so leave 'bounds' unmodified.
@@ -300,6 +420,96 @@ public:
     }
 
 private:
+    // 曲线段结构体
+    struct CurveSegment {
+        SkPath::Verb verb;
+        std::array<SkPoint, 4> points;
+        std::shared_ptr<SkPathMeasure> measure;
+    };
+
+    // 处理单个轮廓的曲线段集合
+    void ProcessContourCurves(std::vector<CurveSegment>& curves, bool closed, SkPath* dst) const {
+        // 如果没有有效曲线，直接返回
+        if (curves.empty()) {
+            return;
+        }
+
+        // 处理单曲线轮廓（无需圆角）
+        if (curves.size() == 1) {
+            dst->moveTo(curves[0].points[0]);
+            if (curves[0].verb == SkPath::kLine_Verb) {
+                dst->lineTo(curves[0].points[3]);
+            } else {
+                dst->cubicTo(curves[0].points[1], curves[0].points[2], curves[0].points[3]);
+            }
+            if (closed) {
+                dst->close();
+            }
+            return;
+        }
+
+        // 对多曲线轮廓进行圆角处理
+        ProcessMultiCurveContour(curves, closed, dst);
+    }
+
+    // 处理多曲线轮廓
+    void ProcessMultiCurveContour(std::vector<CurveSegment>& curves,
+                                  bool closed,
+                                  SkPath* dst) const {
+        const size_t numCurves = curves.size();
+
+        // 为闭合路径准备：计算最后一条和第一条曲线之间的圆角
+        std::array<SkPoint, 4> firstArcPoints;
+        bool hasFirstArc = false;
+
+        if (closed) {
+            hasFirstArc = BuildCornerCurve(curves[numCurves - 1].points,
+                                           curves[numCurves - 1].measure,
+                                           curves[0].points,
+                                           curves[0].measure,
+                                           fRadius,
+                                           firstArcPoints);
+        }
+
+        // 开始绘制轮廓
+        dst->moveTo(curves[0].points[0]);
+
+        // 处理每对相邻曲线
+        for (size_t i = 0; i < numCurves; ++i) {
+            auto& curCurve = curves[i];
+
+            // 绘制当前曲线（可能已被 BuildCornerCurve 修改过端点）
+            if (curCurve.verb == SkPath::kLine_Verb) {
+                dst->lineTo(curCurve.points[3]);
+            } else if (curCurve.verb == SkPath::kCubic_Verb) {
+                dst->cubicTo(curCurve.points[1], curCurve.points[2], curCurve.points[3]);
+            }
+
+            // 计算并插入下一个圆角（除了最后一条曲线）
+            if (i < numCurves - 1) {
+                std::array<SkPoint, 4> arcPoints;
+                bool insertArc = BuildCornerCurve(curCurve.points,
+                                                  curCurve.measure,
+                                                  curves[i + 1].points,
+                                                  curves[i + 1].measure,
+                                                  fRadius,
+                                                  arcPoints);
+
+                if (insertArc) {
+                    dst->cubicTo(arcPoints[1], arcPoints[2], arcPoints[3]);
+                }
+            }
+        }
+
+        // 闭合路径：处理首尾连接
+        if (closed) {
+            if (hasFirstArc) {
+                dst->cubicTo(firstArcPoints[1], firstArcPoints[2], firstArcPoints[3]);
+            }
+            dst->close();
+        }
+    }
+
     const SkScalar fRadius;
 
     using INHERITED = SkPathEffectBase;
