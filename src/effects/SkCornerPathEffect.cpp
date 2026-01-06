@@ -14,14 +14,38 @@
 
 namespace pk {
 namespace {
-// 曲线段结构体
+
+constexpr float kCornerEffectTolerance = 1E-4f;
+constexpr float kPathMeasureResScale = 10.f;
+
+// Curve segment structure
 struct CurveSegment {
     SkPath::Verb verb;
     std::array<SkPoint, 4> points;
-    SkScalar conicWeight = 1.0f;  // 圆锥曲线权重，其他曲线类型忽略
+    SkScalar conicWeight = 1.0f;  // Conic weight, ignored for other curve types
 };
 
-// 根据 CurveSegment 构建 SkPathMeasure
+// Draw CurveSegment to SkPath (without moveTo)
+void DrawCurveSegment(const CurveSegment& curve, SkPath* dst) {
+    switch (curve.verb) {
+        case SkPath::kLine_Verb:
+            dst->lineTo(curve.points[1]);
+            break;
+        case SkPath::kQuad_Verb:
+            dst->quadTo(curve.points[1], curve.points[2]);
+            break;
+        case SkPath::kConic_Verb:
+            dst->conicTo(curve.points[1], curve.points[2], curve.conicWeight);
+            break;
+        case SkPath::kCubic_Verb:
+            dst->cubicTo(curve.points[1], curve.points[2], curve.points[3]);
+            break;
+        default:
+            break;
+    }
+}
+
+// Build SkPathMeasure from CurveSegment
 SkPathMeasure BuildMeasure(const CurveSegment& curve) {
     SkPath path;
     path.moveTo(curve.points[0]);
@@ -41,15 +65,20 @@ SkPathMeasure BuildMeasure(const CurveSegment& curve) {
         default:
             break;
     }
-    return SkPathMeasure(path, false);
+    return SkPathMeasure(path, false, kPathMeasureResScale);
 }
 
 float ComputeTangentDistances(SkVector v1, SkVector v2, float radius) {
     // Calculate the angle between the two vectors
-    auto dotProduct = v1.dot(v2);
+    auto dotProduct = std::max(-1.0f, std::min(1.0f, v1.dot(v2)));
     auto halfAngle = std::acos(dotProduct) / 2.0f;
+    // Guard against division by zero when angle is near 0 or 180 degrees
+    auto tanHalfAngle = std::tan(halfAngle);
+    if (std::abs(tanHalfAngle) < kCornerEffectTolerance) {
+        return std::numeric_limits<float>::max();
+    }
     // The distance from the angle center to each tangent point
-    return radius / std::tan(halfAngle);
+    return radius / tanHalfAngle;
 }
 
 float ArcCubicBezierHandleLength(SkPoint start,
@@ -60,13 +89,19 @@ float ArcCubicBezierHandleLength(SkPoint start,
     auto dotProduct = startTangent.dot(endTangent);
     auto cosAngle = std::max(-1.0f, std::min(1.0f, dotProduct));
     auto angle = std::acos(cosAngle);
-    auto handleLength = (4.f * (1 - std::cos(angle / 2.f))) / (3 * std::sin(angle / 2.f));
-    auto radius = (chordLength / 2.f) / std::sin(angle / 2.f);
+    // Guard against division by zero when angle is near 0
+    auto sinHalfAngle = std::sin(angle / 2.f);
+    if (std::abs(sinHalfAngle) < kCornerEffectTolerance) {
+        return 0.0f;
+    }
+    auto handleLength = (4.f * (1 - std::cos(angle / 2.f))) / (3 * sinHalfAngle);
+    auto radius = (chordLength / 2.f) / sinHalfAngle;
     return handleLength * radius;
 }
 
 bool SkPointsNearlyEqual(const SkPoint& p1, const SkPoint& p2) {
-    return SkScalarNearlyEqual(p1.fX, p2.fX, 1E-4f) && SkScalarNearlyEqual(p1.fY, p2.fY, 1E-4f);
+    return SkScalarNearlyEqual(p1.fX, p2.fX, kCornerEffectTolerance) &&
+           SkScalarNearlyEqual(p1.fY, p2.fY, kCornerEffectTolerance);
 }
 
 }  // namespace
@@ -75,7 +110,7 @@ class SkCornerPathEffectImpl : public SkPathEffectBase {
 public:
     explicit SkCornerPathEffectImpl(SkScalar radius) : fRadius(radius) {}
 
-    // 按轮廓分离处理
+    // Process path by contours
     bool onFilterPath(SkPath* dst,
                       const SkPath& src,
                       SkStrokeRec*,
@@ -85,30 +120,27 @@ public:
             return false;
         }
 
-        // 直接提取曲线段，按轮廓分离
+        // Extract curve segments directly, separated by contours
         SkPath::Iter iter(src, false);
         SkPath::Verb verb;
         std::array<SkPoint, 4> points;
-        std::array<SkPoint, 4> prevPoints;
 
         std::vector<CurveSegment> currentContourCurves;
         bool hasMove = false;
 
         while ((verb = iter.next(points.data())) != SkPath::kDone_Verb) {
             if (verb == SkPath::kMove_Verb) {
-                // 处理前一个轮廓
+                // Process previous contour
                 if (hasMove && !currentContourCurves.empty()) {
                     ProcessContourCurves(currentContourCurves, false, dst);
                     currentContourCurves.clear();
                 }
-                // 记录新轮廓的起点
-                prevPoints[3] = points[0];
                 hasMove = true;
                 continue;
             }
 
             if (verb == SkPath::kClose_Verb) {
-                // 处理闭合轮廓
+                // Process closed contour
                 if (!currentContourCurves.empty()) {
                     ProcessContourCurves(currentContourCurves, true, dst);
                     currentContourCurves.clear();
@@ -117,7 +149,7 @@ public:
                 continue;
             }
 
-            // 提取并归一化曲线段
+            // Extract and normalize curve segment
             CurveSegment segment;
             segment.points = points;
             segment.verb = verb;
@@ -141,10 +173,9 @@ public:
                 }
             }
             currentContourCurves.push_back(segment);
-            prevPoints = segment.points;
         }
 
-        // 处理最后一个轮廓（开放路径）
+        // Process last contour (open path)
         if (hasMove && !currentContourCurves.empty()) {
             ProcessContourCurves(currentContourCurves, false, dst);
         }
@@ -181,8 +212,8 @@ private:
             return false;
         }
         endDir.normalize();
-        if (SkScalarNearlyEqual(startDir.fX, -endDir.fX, 1E-4f) &&
-            SkScalarNearlyEqual(startDir.fY, -endDir.fY, 1E-4f)) {
+        if (SkScalarNearlyEqual(startDir.fX, -endDir.fX, kCornerEffectTolerance) &&
+            SkScalarNearlyEqual(startDir.fY, -endDir.fY, kCornerEffectTolerance)) {
             return false;
         }
 
@@ -240,44 +271,40 @@ private:
         return true;
     }
 
-    // 处理单个轮廓的曲线段集合
+    // Process curve segments of a single contour
     void ProcessContourCurves(std::vector<CurveSegment>& curves, bool closed, SkPath* dst) const {
-        // 如果没有有效曲线，直接返回
+        // Return if no valid curves
         if (curves.empty()) {
             return;
         }
 
-        // 处理单曲线轮廓（无需圆角）
+        // Handle single-curve contour (no corner rounding needed)
         if (curves.size() == 1) {
             dst->moveTo(curves[0].points[0]);
-            if (curves[0].verb == SkPath::kLine_Verb) {
-                dst->lineTo(curves[0].points[3]);
-            } else {
-                dst->cubicTo(curves[0].points[1], curves[0].points[2], curves[0].points[3]);
-            }
+            DrawCurveSegment(curves[0], dst);
             if (closed) {
                 dst->close();
             }
             return;
         }
 
-        // 对多曲线轮廓进行圆角处理
+        // Apply corner rounding to multi-curve contour
         ProcessMultiCurveContour(curves, closed, dst);
     }
 
-    // 处理多曲线轮廓
+    // Process multi-curve contour
     void ProcessMultiCurveContour(std::vector<CurveSegment>& curves,
                                   bool closed,
                                   SkPath* dst) const {
         const size_t numCurves = curves.size();
 
-        // 计算每条曲线的长度
+        // Calculate length of each curve
         std::vector<float> curveLengths(numCurves);
         for (size_t i = 0; i < numCurves; ++i) {
             curveLengths[i] = BuildMeasure(curves[i]).getLength();
         }
 
-        // 为闭合路径准备：计算最后一条和第一条曲线之间的圆角
+        // For closed path: calculate corner between last and first curve
         CurveSegment firstArcCurve;
         bool hasFirstArc = false;
 
@@ -290,16 +317,16 @@ private:
                                            firstArcCurve);
         }
 
-        // 开始绘制轮廓
+        // Start drawing contour
         if (hasFirstArc) {
-            // 绘制最后一条和第一条曲线之间的圆角
+            // Draw corner arc between last and first curve
             dst->moveTo(firstArcCurve.points[0]);
             dst->cubicTo(firstArcCurve.points[1], firstArcCurve.points[2], firstArcCurve.points[3]);
         } else {
             dst->moveTo(curves[0].points[0]);
         }
 
-        // 处理每对相邻曲线
+        // Process each pair of adjacent curves
         for (size_t i = 0; i < numCurves - 1; ++i) {
             CurveSegment arcCurve;
             float startLimit = curveLengths[i] * (i == 0 && closed ? 1.0f : 0.5f);
@@ -307,34 +334,16 @@ private:
 
             bool insertArc = BuildCornerCurve(
                     curves[i], startLimit, curves[i + 1], endLimit, fRadius, arcCurve);
-            // 绘制当前曲线（可能已被 BuildCornerCurve 修改过端点）
-            auto& curCurve = curves[i];
-            if (curCurve.verb == SkPath::kLine_Verb) {
-                dst->lineTo(curCurve.points[1]);
-            } else if (curCurve.verb == SkPath::kQuad_Verb) {
-                dst->quadTo(curCurve.points[1], curCurve.points[2]);
-            } else if (curCurve.verb == SkPath::kConic_Verb) {
-                dst->conicTo(curCurve.points[1], curCurve.points[2], curCurve.conicWeight);
-            } else if (curCurve.verb == SkPath::kCubic_Verb) {
-                dst->cubicTo(curCurve.points[1], curCurve.points[2], curCurve.points[3]);
-            }
+            // Draw current curve (endpoints may have been modified by BuildCornerCurve)
+            DrawCurveSegment(curves[i], dst);
             if (insertArc) {
                 dst->cubicTo(arcCurve.points[1], arcCurve.points[2], arcCurve.points[3]);
             }
         }
 
-        auto& curCurve = curves.back();
-        if (curCurve.verb == SkPath::kLine_Verb) {
-            dst->lineTo(curCurve.points[1]);
-        } else if (curCurve.verb == SkPath::kQuad_Verb) {
-            dst->quadTo(curCurve.points[1], curCurve.points[2]);
-        } else if (curCurve.verb == SkPath::kConic_Verb) {
-            dst->conicTo(curCurve.points[1], curCurve.points[2], curCurve.conicWeight);
-        } else if (curCurve.verb == SkPath::kCubic_Verb) {
-            dst->cubicTo(curCurve.points[1], curCurve.points[2], curCurve.points[3]);
-        }
+        DrawCurveSegment(curves.back(), dst);
 
-        // 闭合路径：处理首尾连接
+        // Close path: handle start-end connection
         if (closed) {
             dst->close();
         }
