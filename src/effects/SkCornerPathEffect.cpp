@@ -11,6 +11,7 @@
 #include "include/core/SkPoint.h"
 #include "src/core/SkPathEffectBase.h"
 #include <array>
+#include <limits>
 
 namespace pk {
 namespace {
@@ -190,6 +191,8 @@ public:
     }
 
 private:
+    // Build corner arc curve between two adjacent curves.
+    // Note: startCurve and endCurve will be modified (trimmed) in place.
     bool BuildCornerCurve(CurveSegment& startCurve,
                           float startTangentDistanceLimit,
                           CurveSegment& endCurve,
@@ -329,8 +332,8 @@ private:
         // Process each pair of adjacent curves
         for (size_t i = 0; i < numCurves - 1; ++i) {
             CurveSegment arcCurve;
-            float startLimit = curveLengths[i] * (i == 0 && closed ? 1.0f : 0.5f);
-            float endLimit = curveLengths[i + 1] * (i == numCurves - 2 && closed ? 1.0f : 0.5f);
+            float startLimit = curveLengths[i] * (i == 0 && !closed ? 1.0f : 0.5f);
+            float endLimit = curveLengths[i + 1] * (i == numCurves - 2 && !closed ? 1.0f : 0.5f);
 
             bool insertArc = BuildCornerCurve(
                     curves[i], startLimit, curves[i + 1], endLimit, fRadius, arcCurve);
