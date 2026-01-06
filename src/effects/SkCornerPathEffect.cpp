@@ -291,7 +291,13 @@ private:
         }
 
         // 开始绘制轮廓
-        dst->moveTo(curves[0].points[0]);
+        if (hasFirstArc) {
+            // 绘制最后一条和第一条曲线之间的圆角
+            dst->moveTo(firstArcCurve.points[0]);
+            dst->cubicTo(firstArcCurve.points[1], firstArcCurve.points[2], firstArcCurve.points[3]);
+        } else {
+            dst->moveTo(curves[0].points[0]);
+        }
 
         // 处理每对相邻曲线
         for (size_t i = 0; i < numCurves - 1; ++i) {
@@ -330,10 +336,6 @@ private:
 
         // 闭合路径：处理首尾连接
         if (closed) {
-            if (hasFirstArc) {
-                dst->cubicTo(
-                        firstArcCurve.points[1], firstArcCurve.points[2], firstArcCurve.points[3]);
-            }
             dst->close();
         }
     }
