@@ -11,7 +11,7 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkScalar.h"
-#include "include/core/SkStrokeParams.h"
+#include "src/core/SkStroke.h"
 #include "src/core/SkGeometry.h"
 
 namespace pk {

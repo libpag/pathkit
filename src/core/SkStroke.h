@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <vector>
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
 #include "include/core/SkPoint.h"
@@ -14,6 +15,25 @@
 #include "src/core/SkStrokerPriv.h"
 
 namespace pk {
+
+// Encapsulates stroke parameters (miter limit, cap, join)
+struct SkStrokeParams {
+    SkScalar miterLimit;
+    SkPaint::Cap cap;
+    SkPaint::Join join;
+
+    SkStrokeParams(SkScalar ml, SkPaint::Cap c, SkPaint::Join j)
+            : miterLimit(ml), cap(c), join(j) {}
+
+    SkStrokeParams();
+
+    bool operator==(const SkStrokeParams& other) const {
+        return miterLimit == other.miterLimit && cap == other.cap && join == other.join;
+    }
+
+    bool operator!=(const SkStrokeParams& other) const { return !(*this == other); }
+};
+
 /** \class SkStroke
     SkStroke is the utility class that constructs paths by stroking
     geometries (lines, rects, ovals, roundrects, paths). This is
@@ -55,6 +75,24 @@ public:
     void    strokeRect(const SkRect& rect, SkPath* result,
                        SkPathDirection = SkPathDirection::kCW) const;
     void    strokePath(const SkPath& path, SkPath*) const;
+
+    /**
+     * Apply stroke with multiple parameters to a path.
+     * Each segment can have different stroke parameters (miter limit, cap, join).
+     * If params are fewer than segments, they will be cycled through.
+     * 
+     * @param src Source path to stroke
+     * @param dst Output stroked path (must not be null)
+     * @param width Stroke width (must be >= 0)
+     * @param params Vector of stroke parameters (must not be empty)
+     * @param resScale Resolution scale factor (must be > 0)
+     * @return true if successful, false on error
+     */
+    static bool StrokePathWithMultiParams(const SkPath& src,
+                                          SkPath* dst,
+                                          SkScalar width,
+                                          const std::vector<SkStrokeParams>& params,
+                                          SkScalar resScale);
 
     ////////////////////////////////////////////////////////////////
 

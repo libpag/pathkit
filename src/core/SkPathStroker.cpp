@@ -10,11 +10,11 @@
 #include <utility>
 
 #include "src/core/SkStrokerPriv.h"
-#include "include/private/SkMacros.h"
-#include "src/core/SkGeometry.h"
-#include "src/core/SkPathPriv.h"
+// #include "include/private/SkMacros.h"
+// #include "src/core/SkGeometry.h"
+// #include "src/core/SkPathPriv.h"
 #include "src/core/SkPointPriv.h"
-#include "src/core/SkPaintDefaults.h"
+// #include "src/core/SkPaintDefaults.h"
 
 namespace pk {
 
