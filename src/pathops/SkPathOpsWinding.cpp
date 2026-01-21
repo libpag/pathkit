@@ -138,9 +138,8 @@ void SkOpSegment::rayCheck(const SkOpRayHit& base, SkOpRayDir dir, SkOpRayHit** 
         if (base.fSpan->segment() == this && approximately_equal(base.fT, t)) {
             continue;
         }
-        SkDVector slope;
+        SkDVector slope = {0, 0};
         SkPoint pt;
-        PkDEBUGCODE(sk_bzero(&slope, sizeof(slope)));
         bool valid = false;
         if (approximately_zero(t)) {
             pt = fPts[0];
