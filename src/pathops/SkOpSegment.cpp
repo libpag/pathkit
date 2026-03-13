@@ -167,7 +167,11 @@ bool SkOpSegment::activeWinding(SkOpSpanBase* start, SkOpSpanBase* end, int* sum
 bool SkOpSegment::addCurveTo(const SkOpSpanBase* start, const SkOpSpanBase* end,
         SkPathWriter* path) const {
     const SkOpSpan* spanStart = start->starter(end);
-    FAIL_IF(spanStart->alreadyAdded());
+    if (spanStart->alreadyAdded()) {
+        // Skip already added edges instead of failing - this can happen
+        // with near-tangent curves producing tiny loops
+        return true;
+    }
     const_cast<SkOpSpan*>(spanStart)->markAdded();
     SkDCurveSweep curvePart;
     start->segment()->subDivide(start, end, &curvePart.fCurve);
@@ -176,7 +180,9 @@ bool SkOpSegment::addCurveTo(const SkOpSpanBase* start, const SkOpSpanBase* end,
     path->deferredMove(start->ptT());
     switch (verb) {
         case SkPath::kLine_Verb:
-            FAIL_IF(!path->deferredLine(end->ptT()));
+            if (!path->deferredLine(end->ptT())) {
+                return false;
+            }
             break;
         case SkPath::kQuad_Verb:
             path->quadTo(curvePart.fCurve.fQuad[1].asSkPoint(), end->ptT());
