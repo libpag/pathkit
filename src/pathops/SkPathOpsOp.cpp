@@ -25,17 +25,25 @@ static bool findChaseOp(SkTDArray<SkOpSpanBase*>& chase, SkOpSpanBase** startPtr
         // OPTIMIZE: prev makes this compatible with old code -- but is it necessary?
         *startPtr = span->ptT()->prev()->span();
         SkOpSegment* segment = (*startPtr)->segment();
+        // Skip if the segment is already done to avoid infinite loop.
+        if (segment->done()) {
+            continue;
+        }
         bool done = true;
         *endPtr = nullptr;
         if (SkOpAngle* last = segment->activeAngle(*startPtr, startPtr, endPtr, &done)) {
             *startPtr = last->start();
             *endPtr = last->end();
+            SkOpSegment* lastSegment = last->segment();
+            // Only re-add span to chase if the target segment is not done.
+            if (!lastSegment->done()) {
    #if TRY_ROTATE
-            *chase.insert(0) = span;
+                *chase.insert(0) = span;
    #else
-            *chase.append() = span;
+                *chase.append() = span;
    #endif
-            *result = last->segment();
+            }
+            *result = lastSegment;
             return true;
         }
         if (done) {
@@ -98,11 +106,14 @@ static bool findChaseOp(SkTDArray<SkOpSpanBase*>& chase, SkOpSpanBase** startPtr
             }
         }
         if (first) {
+            // Only re-add span to chase if first segment is not done.
+            if (!first->done()) {
        #if TRY_ROTATE
-            *chase.insert(0) = span;
+                *chase.insert(0) = span;
        #else
-            *chase.append() = span;
+                *chase.append() = span;
        #endif
+            }
             *result = first;
             return true;
         }

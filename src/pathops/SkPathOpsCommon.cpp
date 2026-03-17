@@ -86,18 +86,26 @@ SkOpSegment* FindChase(SkTDArray<SkOpSpanBase*>* chase, SkOpSpanBase** startPtr,
         SkOpSpanBase* span;
         chase->pop(&span);
         SkOpSegment* segment = span->segment();
+        // Skip if the segment is already done to avoid infinite loop.
+        if (segment->done()) {
+            continue;
+        }
         *startPtr = span->ptT()->next()->span();
         bool done = true;
         *endPtr = nullptr;
         if (SkOpAngle* last = segment->activeAngle(*startPtr, startPtr, endPtr, &done)) {
             *startPtr = last->start();
             *endPtr = last->end();
+            SkOpSegment* lastSegment = last->segment();
+            // Only re-add span to chase if the target segment is not done.
+            if (!lastSegment->done()) {
     #if TRY_ROTATE
-            *chase->insert(0) = span;
+                *chase->insert(0) = span;
     #else
-            *chase->append() = span;
+                *chase->append() = span;
     #endif
-            return last->segment();
+            }
+            return lastSegment;
         }
         if (done) {
             continue;
@@ -141,11 +149,14 @@ SkOpSegment* FindChase(SkTDArray<SkOpSpanBase*>* chase, SkOpSpanBase** startPtr,
             }
         }
         if (first) {
+            // Only re-add span to chase if first segment is not done.
+            if (!first->done()) {
        #if TRY_ROTATE
-            *chase->insert(0) = span;
+                *chase->insert(0) = span;
        #else
-            *chase->append() = span;
+                *chase->append() = span;
        #endif
+            }
             return first;
         }
     }
