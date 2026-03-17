@@ -167,9 +167,20 @@ bool SkOpSegment::activeWinding(SkOpSpanBase* start, SkOpSpanBase* end, int* sum
 bool SkOpSegment::addCurveTo(const SkOpSpanBase* start, const SkOpSpanBase* end,
         SkPathWriter* path) const {
     const SkOpSpan* spanStart = start->starter(end);
+    printf("[DEBUG] addCurveTo: seg=%d spanStart=%p t=%.9g, start=(%.9g,%.9g) t=%.9g end=(%.9g,%.9g) t=%.9g\n",
+             this->debugID(), (void*)spanStart, spanStart->t(),
+             start->pt().fX, start->pt().fY, start->t(),
+             end->pt().fX, end->pt().fY, end->t());
+    fflush(stdout);
     if (spanStart->alreadyAdded()) {
-        return false;
+        printf("[DEBUG] addCurveTo: alreadyAdded() returned true for seg=%d spanStart=%p\n",
+                 this->debugID(), (void*)spanStart);
+        fflush(stdout);
+        return true;
     }
+    printf("[DEBUG] addCurveTo: calling markAdded() for seg=%d spanStart=%p\n",
+             this->debugID(), (void*)spanStart);
+    fflush(stdout);
     const_cast<SkOpSpan*>(spanStart)->markAdded();
     SkDCurveSweep curvePart;
     start->segment()->subDivide(start, end, &curvePart.fCurve);
@@ -1055,15 +1066,33 @@ bool SkOpSegment::markWinding(SkOpSpan* span, int winding, int oppWinding) {
 bool SkOpSegment::match(const SkOpPtT* base, const SkOpSegment* testParent, double testT,
         const SkPoint& testPt) const {
     PkASSERT(this == base->segment());
+    // Debug: check if this is near the problem area
+    bool nearProblem = (testPt.fX > 5.0 && testPt.fX < 5.5 && testPt.fY > 15.5 && testPt.fY < 16.0);
     if (this == testParent) {
         if (precisely_equal(base->fT, testT)) {
+            if (nearProblem) {
+                printf("[DEBUG-MATCH] precisely_equal TRUE: baseT=%.9g testT=%.9g\n", base->fT, testT);
+                fflush(stdout);
+            }
             return true;
         }
     }
-    if (!SkDPoint::ApproximatelyEqual(testPt, base->fPt)) {
+    bool approxEqual = SkDPoint::ApproximatelyEqual(testPt, base->fPt);
+    if (!approxEqual) {
+        if (nearProblem) {
+            printf("[DEBUG-MATCH] ApproximatelyEqual FALSE: basePt=(%.9g,%.9g) testPt=(%.9g,%.9g)\n",
+                   base->fPt.fX, base->fPt.fY, testPt.fX, testPt.fY);
+            fflush(stdout);
+        }
         return false;
     }
-    return this != testParent || !this->ptsDisjoint(base->fT, base->fPt, testT, testPt);
+    bool disjoint = (this == testParent) && this->ptsDisjoint(base->fT, base->fPt, testT, testPt);
+    if (nearProblem) {
+        printf("[DEBUG-MATCH] basePt=(%.9g,%.9g) baseT=%.9g testPt=(%.9g,%.9g) testT=%.9g approxEqual=%d disjoint=%d\n",
+               base->fPt.fX, base->fPt.fY, base->fT, testPt.fX, testPt.fY, testT, approxEqual, disjoint);
+        fflush(stdout);
+    }
+    return this != testParent || !disjoint;
 }
 
 static SkOpSegment* set_last(SkOpSpanBase** last, SkOpSpanBase* endSpan) {
