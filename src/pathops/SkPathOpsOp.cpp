@@ -125,33 +125,28 @@ static bool findChaseOp(SkTDArray<SkOpSpanBase*>& chase, SkOpSpanBase** startPtr
 
 static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
         const int xorMask, const int xorOpMask, SkPathWriter* writer) {
-    // Count total segments and spans for dynamic loop limits
+    // Count contours and segments for dynamic loop limits
+    int totalContours = 0;
     int totalSegments = 0;
-    int totalSpans = 0;
     SkOpContour* contour = contourList;
     while (contour) {
-        int segCount = contour->count();
-        totalSegments += segCount;
-        if (segCount > 0) {
-            SkOpSegment* seg = contour->first();
-            while (seg) {
-                totalSpans += seg->count();
-                seg = seg->next();
-            }
-        }
+        ++totalContours;
+        totalSegments += contour->count();
         contour = contour->next();
     }
-    // Set loop limits based on actual data size, with a reasonable minimum
-    // Each span could be visited multiple times in complex cases, so use a multiplier
+    // Set loop limits based on what each loop processes
     const int kMinLoops = 100;
     const int kMultiplier = 10;
-    const int maxLoops = std::max(kMinLoops, (totalSegments + totalSpans) * kMultiplier);
+    // Outer loop: processes contours, limit based on contour count
+    const int maxOuterLoops = std::max(kMinLoops, totalContours * kMultiplier);
+    // Curve loop: traverses segments, limit based on segment count
+    const int maxCurveLoops = std::max(kMinLoops, totalSegments * kMultiplier);
     bool unsortable = false;
     bool lastSimple = false;
     bool simple = false;
     int outerLoopCount = 0;
     do {
-        if (++outerLoopCount > maxLoops) {
+        if (++outerLoopCount > maxOuterLoops) {
             break;
         }
         SkOpSpan* span = FindSortableTop(contourList);
@@ -162,15 +157,24 @@ static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
         SkOpSpanBase* start = span->next();
         SkOpSpanBase* end = span;
         SkTDArray<SkOpSpanBase*> chase;
+        // Calculate span count for current contour to set inner loop limit
+        int currentContourSpans = 0;
+        SkOpContour* currentContour = current->contour();
+        SkOpSegment* seg = currentContour->first();
+        while (seg) {
+            currentContourSpans += seg->count();
+            seg = seg->next();
+        }
+        const int maxInnerLoops = std::max(kMinLoops, currentContourSpans * kMultiplier);
         int innerLoopCount = 0;
         do {
-            if (++innerLoopCount > maxLoops) {
+            if (++innerLoopCount > maxInnerLoops) {
                 break;
             }
             if (current->activeOp(start, end, xorMask, xorOpMask, op)) {
                 int curveLoopCount = 0;
                 do {
-                    if (++curveLoopCount > maxLoops) {
+                    if (++curveLoopCount > maxCurveLoops) {
                         break;
                     }
                     if (!unsortable && current->done()) {
