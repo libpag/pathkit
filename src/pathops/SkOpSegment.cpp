@@ -1066,33 +1066,15 @@ bool SkOpSegment::markWinding(SkOpSpan* span, int winding, int oppWinding) {
 bool SkOpSegment::match(const SkOpPtT* base, const SkOpSegment* testParent, double testT,
         const SkPoint& testPt) const {
     PkASSERT(this == base->segment());
-    // Debug: check if this is near the problem area
-    bool nearProblem = (testPt.fX > 5.0 && testPt.fX < 5.5 && testPt.fY > 15.5 && testPt.fY < 16.0);
     if (this == testParent) {
         if (precisely_equal(base->fT, testT)) {
-            if (nearProblem) {
-                printf("[DEBUG-MATCH] precisely_equal TRUE: baseT=%.9g testT=%.9g\n", base->fT, testT);
-                fflush(stdout);
-            }
             return true;
         }
     }
-    bool approxEqual = SkDPoint::ApproximatelyEqual(testPt, base->fPt);
-    if (!approxEqual) {
-        if (nearProblem) {
-            printf("[DEBUG-MATCH] ApproximatelyEqual FALSE: basePt=(%.9g,%.9g) testPt=(%.9g,%.9g)\n",
-                   base->fPt.fX, base->fPt.fY, testPt.fX, testPt.fY);
-            fflush(stdout);
-        }
+    if (!SkDPoint::ApproximatelyEqual(testPt, base->fPt)) {
         return false;
     }
-    bool disjoint = (this == testParent) && this->ptsDisjoint(base->fT, base->fPt, testT, testPt);
-    if (nearProblem) {
-        printf("[DEBUG-MATCH] basePt=(%.9g,%.9g) baseT=%.9g testPt=(%.9g,%.9g) testT=%.9g approxEqual=%d disjoint=%d\n",
-               base->fPt.fX, base->fPt.fY, base->fT, testPt.fX, testPt.fY, testT, approxEqual, disjoint);
-        fflush(stdout);
-    }
-    return this != testParent || !disjoint;
+    return this != testParent || !this->ptsDisjoint(base->fT, base->fPt, testT, testPt);
 }
 
 static SkOpSegment* set_last(SkOpSpanBase** last, SkOpSpanBase* endSpan) {

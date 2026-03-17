@@ -33,25 +33,6 @@ void SkIntersections::flip() {
 }
 
 int SkIntersections::insert(double one, double two, const SkDPoint& pt) {
-    // Debug output for points near the problem area
-    bool nearProblem = (pt.fX > 5.0 && pt.fX < 5.5 && pt.fY > 15.5 && pt.fY < 16.0);
-    if (nearProblem) {
-        printf("[DEBUG-INSERT] pt=(%.9g,%.9g) t1=%.9g t2=%.9g fUsed=%d\n",
-               pt.fX, pt.fY, one, two, fUsed);
-        printf("[DEBUG-INSERT] MORE_ROUGH_EPSILON=%.9g\n", MORE_ROUGH_EPSILON);
-        for (int i = 0; i < fUsed; ++i) {
-            double t1Diff = fabs(fT[0][i] - one);
-            double t2Diff = fabs(fT[1][i] - two);
-            bool t1Close = more_roughly_equal(fT[0][i], one);
-            bool t2Close = more_roughly_equal(fT[1][i], two);
-            bool coordsClose = pt.approximatelyEqual(fPt[i]);
-            printf("[DEBUG-INSERT]   existing[%d]: pt=(%.9g,%.9g) t1=%.9g t2=%.9g\n",
-                   i, fPt[i].fX, fPt[i].fY, fT[0][i], fT[1][i]);
-            printf("[DEBUG-INSERT]     t1Diff=%.9g t2Diff=%.9g t1Close=%d t2Close=%d coordsClose=%d\n",
-                   t1Diff, t2Diff, t1Close, t2Close, coordsClose);
-        }
-        fflush(stdout);
-    }
     if (fIsCoincident[0] == 3 && between(fT[0][0], one, fT[0][1])) {
         // For now, don't allow a mix of coincident and non-coincident intersections
         return -1;

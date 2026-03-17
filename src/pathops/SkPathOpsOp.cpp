@@ -10,6 +10,7 @@
 #include "src/pathops/SkPathOpsCommon.h"
 #include "src/pathops/SkPathWriter.h"
 
+#include <algorithm>
 #include <utility>
 
 #if DEBUG_T_SECT_LOOP_COUNT
@@ -124,17 +125,33 @@ static bool findChaseOp(SkTDArray<SkOpSpanBase*>& chase, SkOpSpanBase** startPtr
 
 static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
         const int xorMask, const int xorOpMask, SkPathWriter* writer) {
-    printf("[DEBUG] bridgeOp: entered\n");
-    fflush(stdout);
+    // Count total segments and spans for dynamic loop limits
+    int totalSegments = 0;
+    int totalSpans = 0;
+    SkOpContour* contour = contourList;
+    while (contour) {
+        int segCount = contour->count();
+        totalSegments += segCount;
+        if (segCount > 0) {
+            SkOpSegment* seg = contour->first();
+            while (seg) {
+                totalSpans += seg->count();
+                seg = seg->next();
+            }
+        }
+        contour = contour->next();
+    }
+    // Set loop limits based on actual data size, with a reasonable minimum
+    // Each span could be visited multiple times in complex cases, so use a multiplier
+    const int kMinLoops = 100;
+    const int kMultiplier = 10;
+    const int maxLoops = std::max(kMinLoops, (totalSegments + totalSpans) * kMultiplier);
     bool unsortable = false;
     bool lastSimple = false;
     bool simple = false;
     int outerLoopCount = 0;
-    const int kMaxOuterLoops = 10000;  // Prevent infinite loops
     do {
-        if (++outerLoopCount > kMaxOuterLoops) {
-            printf("[DEBUG] bridgeOp: exceeded max outer loop count, breaking\n");
-            fflush(stdout);
+        if (++outerLoopCount > maxLoops) {
             break;
         }
         SkOpSpan* span = FindSortableTop(contourList);
@@ -146,20 +163,14 @@ static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
         SkOpSpanBase* end = span;
         SkTDArray<SkOpSpanBase*> chase;
         int innerLoopCount = 0;
-        const int kMaxInnerLoops = 10000;
         do {
-            if (++innerLoopCount > kMaxInnerLoops) {
-                printf("[DEBUG] bridgeOp: exceeded max inner loop count, breaking\n");
-                fflush(stdout);
+            if (++innerLoopCount > maxLoops) {
                 break;
             }
             if (current->activeOp(start, end, xorMask, xorOpMask, op)) {
                 int curveLoopCount = 0;
-                const int kMaxCurveLoops = 10000;
                 do {
-                    if (++curveLoopCount > kMaxCurveLoops) {
-                        printf("[DEBUG] bridgeOp: exceeded max curve loop count, breaking\n");
-                        fflush(stdout);
+                    if (++curveLoopCount > maxLoops) {
                         break;
                     }
                     if (!unsortable && current->done()) {
@@ -176,8 +187,6 @@ static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
                                 && current->verb() != SkPath::kLine_Verb
                                 && !writer->isClosed()) {
                             if (!current->addCurveTo(start, end, writer)) {
-                                printf("[DEBUG] bridgeOp: addCurveTo failed at line 157\n");
-                                fflush(stdout);
                                 return false;
                             }
                             if (!writer->isClosed()) {
@@ -185,8 +194,6 @@ static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
                             }
                         } else if (lastSimple) {
                             if (!current->addCurveTo(start, end, writer)) {
-                                printf("[DEBUG] bridgeOp: addCurveTo failed at line 164\n");
-                                fflush(stdout);
                                 return false;
                             }
                         }
@@ -198,8 +205,6 @@ static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
                             end->pt().fX, end->pt().fY);
         #endif
                     if (!current->addCurveTo(start, end, writer)) {
-                        printf("[DEBUG] bridgeOp: addCurveTo failed at line 175\n");
-                        fflush(stdout);
                         return false;
                     }
                     current = next;
@@ -210,8 +215,6 @@ static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
                     SkOpSpan* spanStart = start->starter(end);
                     if (!spanStart->done()) {
                         if (!current->addCurveTo(start, end, writer)) {
-                            printf("[DEBUG] bridgeOp: addCurveTo failed at line 192\n");
-                            fflush(stdout);
                             return false;
                         }
                         current->markDone(spanStart);
@@ -221,8 +224,6 @@ static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
             } else {
                 SkOpSpanBase* last;
                 if (!current->markAndChaseDone(start, end, &last)) {
-                    printf("[DEBUG] bridgeOp: markAndChaseDone failed\n");
-                    fflush(stdout);
                     return false;
                 }
                 if (last && !last->chased()) {
@@ -239,8 +240,6 @@ static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
                 }
             }
             if (!findChaseOp(chase, &start, &end, &current)) {
-                printf("[DEBUG] bridgeOp: findChaseOp failed\n");
-                fflush(stdout);
                 return false;
             }
             SkPathOpsDebug::ShowActiveSpans(contourList);
