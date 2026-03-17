@@ -168,9 +168,7 @@ bool SkOpSegment::addCurveTo(const SkOpSpanBase* start, const SkOpSpanBase* end,
         SkPathWriter* path) const {
     const SkOpSpan* spanStart = start->starter(end);
     if (spanStart->alreadyAdded()) {
-        // Skip already added edges instead of failing - this can happen
-        // with near-tangent curves producing tiny loops
-        return true;
+        return false;
     }
     const_cast<SkOpSpan*>(spanStart)->markAdded();
     SkDCurveSweep curvePart;
