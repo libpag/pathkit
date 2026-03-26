@@ -167,7 +167,20 @@ bool SkOpSegment::activeWinding(SkOpSpanBase* start, SkOpSpanBase* end, int* sum
 bool SkOpSegment::addCurveTo(const SkOpSpanBase* start, const SkOpSpanBase* end,
         SkPathWriter* path) const {
     const SkOpSpan* spanStart = start->starter(end);
-    FAIL_IF(spanStart->alreadyAdded());
+    printf("[DEBUG] addCurveTo: seg=%d spanStart=%p t=%.9g, start=(%.9g,%.9g) t=%.9g end=(%.9g,%.9g) t=%.9g\n",
+             this->debugID(), (void*)spanStart, spanStart->t(),
+             start->pt().fX, start->pt().fY, start->t(),
+             end->pt().fX, end->pt().fY, end->t());
+    fflush(stdout);
+    if (spanStart->alreadyAdded()) {
+        printf("[DEBUG] addCurveTo: alreadyAdded() returned true for seg=%d spanStart=%p\n",
+                 this->debugID(), (void*)spanStart);
+        fflush(stdout);
+        return true;
+    }
+    printf("[DEBUG] addCurveTo: calling markAdded() for seg=%d spanStart=%p\n",
+             this->debugID(), (void*)spanStart);
+    fflush(stdout);
     const_cast<SkOpSpan*>(spanStart)->markAdded();
     SkDCurveSweep curvePart;
     start->segment()->subDivide(start, end, &curvePart.fCurve);
@@ -176,7 +189,9 @@ bool SkOpSegment::addCurveTo(const SkOpSpanBase* start, const SkOpSpanBase* end,
     path->deferredMove(start->ptT());
     switch (verb) {
         case SkPath::kLine_Verb:
-            FAIL_IF(!path->deferredLine(end->ptT()));
+            if (!path->deferredLine(end->ptT())) {
+                return false;
+            }
             break;
         case SkPath::kQuad_Verb:
             path->quadTo(curvePart.fCurve.fQuad[1].asSkPoint(), end->ptT());
