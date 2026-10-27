@@ -170,10 +170,48 @@ pk::SkPath MakeThinMixedConic() {
   return path;
 }
 
+// addOval() emits conics, so this is the same three levels as 回 but bounded by curves: every
+// level is decided by a chord sum plus an error bound instead of by a cross product.
+pk::SkPath MakeCurvedNested() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.addOval(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+  path.addOval(pk::SkRect::MakeLTRB(150, 150, 850, 850), pk::SkPathDirection::kCW);
+  path.addOval(pk::SkRect::MakeLTRB(300, 300, 700, 700), pk::SkPathDirection::kCW);
+  return path;
+}
+
+// The left-most point of the inner contour is a cusp: both edges meeting there run to the right,
+// so the edge leaving it heads into the shape. Reading the tangent at that point reports where the
+// boundary came from rather than the way the contour runs, which made the counter look like it
+// already ran against the outline around it and left it filled in.
+pk::SkPath MakeLeftmostCusp() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+  path.moveTo(200, 300);
+  path.quadTo(400, 320, 600, 400);
+  path.lineTo(600, 700);
+  path.lineTo(350, 700);
+  path.close();
+  return path;
+}
+
+// The same ring, but with the inner contour already running against the outer one, so the outline
+// is winding-correct before the conversion and nothing has to be turned around.
+pk::SkPath MakeOppositeRing() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+  path.addRect(pk::SkRect::MakeLTRB(200, 200, 800, 800), pk::SkPathDirection::kCCW);
+  return path;
+}
+
 std::vector<Case> MakeCases() {
   std::vector<Case> cases;
   cases.push_back({"SingleRing", MakeRing(0, 0, 1000, 1000, 200, 200, 800, 800),
                    {500, 500, 100, 500, 900, 900}});
+  cases.push_back({"OppositeRing", MakeOppositeRing(), {500, 500, 100, 500}});
   cases.push_back({"Islands", MakeIslands(),
                    {190, 190, 590, 190, 990, 190, 20, 190, 420, 190, 820, 190}});
   cases.push_back({"NestedThreeLevels", MakeNested(), {75, 500, 220, 500, 500, 500}});
@@ -191,6 +229,8 @@ std::vector<Case> MakeCases() {
   }
   cases.push_back({"ThinQuadBand", MakeThinQuadBand(), {512, 511.9375f, 512, 300}});
   cases.push_back({"ThinMixedConic", MakeThinMixedConic(), {500, 400, 500, 100}});
+  cases.push_back({"LeftmostCusp", MakeLeftmostCusp(), {450, 600, 100, 100, 900, 900}});
+  cases.push_back({"CurvedNestedThreeLevels", MakeCurvedNested(), {60, 500, 220, 500, 500, 500}});
   return cases;
 }
 
