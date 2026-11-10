@@ -7,6 +7,11 @@
  * because the conversion must not rebuild the geometry -- only reverse contours -- so a counter a
  * fraction of a unit wide has to survive even though pathops quantises coordinates that finely.
  *
+ * The conversion also normalizes orientation: every outermost contour ends up clockwise and every
+ * counter counter-clockwise. Those cases are checked separately from the probe cases, because
+ * normalizing contours that cross each other can change the filled area, which is outside what
+ * this function promises to preserve.
+ *
  * Every case is also run through SkOpBuilder::resolve(), which is the other pathkit entry for the
  * same conversion (Simplify followed by FixWinding). That second run is reported as information
  * only: it is what decides whether AsWinding() could simply be reimplemented on top of it, so its
@@ -207,6 +212,43 @@ pk::SkPath MakeOppositeRing() {
   return path;
 }
 
+// A pentagram after Simplify(): a decagon outline with a pentagon at its centre, the two touching
+// at the decagon's five concave vertices. The pentagon is the hole in the middle of the star. Its
+// left-most point is one of those shared vertices, so casting a containment ray from it puts the
+// ray's end on the decagon's boundary: the hole used to read as an independent outline, kept its
+// clockwise direction and was filled in.
+pk::SkPath MakeTouchingContours() {
+  constexpr float kCenter = 500.0f;
+  constexpr float kOuter = 400.0f;
+  constexpr float kInner = 200.0f;
+  constexpr double kPi = 3.14159265358979323846;
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  std::vector<pk::SkPoint> decagon;
+  std::vector<pk::SkPoint> pentagon;
+  for (int index = 0; index < 10; ++index) {
+    const double angle = -kPi / 2 + index * kPi / 5;
+    const float radius = index % 2 == 0 ? kOuter : kInner;
+    auto point = pk::SkPoint::Make(kCenter + radius * static_cast<float>(std::cos(angle)),
+                                   kCenter + radius * static_cast<float>(std::sin(angle)));
+    decagon.push_back(point);
+    if (index % 2 != 0) {
+      pentagon.push_back(point);
+    }
+  }
+  path.moveTo(decagon.front());
+  for (size_t index = 1; index < decagon.size(); ++index) {
+    path.lineTo(decagon[index]);
+  }
+  path.close();
+  path.moveTo(pentagon.front());
+  for (size_t index = 1; index < pentagon.size(); ++index) {
+    path.lineTo(pentagon[index]);
+  }
+  path.close();
+  return path;
+}
+
 std::vector<Case> MakeCases() {
   std::vector<Case> cases;
   cases.push_back({"SingleRing", MakeRing(0, 0, 1000, 1000, 200, 200, 800, 800),
@@ -231,6 +273,8 @@ std::vector<Case> MakeCases() {
   cases.push_back({"ThinMixedConic", MakeThinMixedConic(), {500, 400, 500, 100}});
   cases.push_back({"LeftmostCusp", MakeLeftmostCusp(), {450, 600, 100, 100, 900, 900}});
   cases.push_back({"CurvedNestedThreeLevels", MakeCurvedNested(), {60, 500, 220, 500, 500, 500}});
+  cases.push_back({"TouchingContours", MakeTouchingContours(),
+                   {500, 500, 500, 150, 850, 500, 150, 500, 0, 0}});
   return cases;
 }
 
@@ -242,6 +286,39 @@ void RunAsWinding(const Case& testCase) {
   }
   Report(KeepsProbes(testCase.source, winding, testCase.probes), testCase.name,
          "the filled area changed");
+}
+
+// The sign of each contour's signed area, in path order: +1 for clockwise, -1 for the other way.
+// The outlines checked below are polygons, so a curve's endpoints are enough to read its
+// direction.
+std::vector<int> ContourDirections(const pk::SkPath& path) {
+  std::vector<int> directions;
+  pk::SkPath::Iter iter(path, false);
+  pk::SkPoint pts[4];
+  double area = 0.0;
+  bool started = false;
+  pk::SkPath::Verb verb;
+  while ((verb = iter.next(pts)) != pk::SkPath::kDone_Verb) {
+    if (verb == pk::SkPath::kMove_Verb) {
+      if (started) {
+        directions.push_back(area > 0 ? 1 : area < 0 ? -1 : 0);
+      }
+      area = 0.0;
+      started = true;
+      continue;
+    }
+    if (verb == pk::SkPath::kClose_Verb) {
+      continue;
+    }
+    const int end = verb == pk::SkPath::kCubic_Verb ? 3
+                  : verb == pk::SkPath::kLine_Verb ? 1 : 2;
+    area += static_cast<double>(pts[0].fX) * pts[end].fY
+          - static_cast<double>(pts[end].fX) * pts[0].fY;
+  }
+  if (started) {
+    directions.push_back(area > 0 ? 1 : area < 0 ? -1 : 0);
+  }
+  return directions;
 }
 
 // resolve() hands back an even-odd result, so probing it without switching the fill type would
@@ -286,6 +363,53 @@ void TestWindingIsLeftAlone() {
   Report(winding == source, "WindingIsLeftAlone", "a winding path was rewritten");
 }
 
+// Every outermost contour has to come back clockwise, even when it is the only contour, when
+// nothing is nested inside any of them, or when it arrived running the other way. A counter runs
+// the other way than the outermost contour it ended up inside.
+void TestNormalizedDirections() {
+  auto check = [](const pk::SkPath& source, const std::vector<int>& expected, const char* name) {
+    pk::SkPath winding;
+    if (!pk::AsWinding(source, &winding)) {
+      Report(false, name, "AsWinding() returned false");
+      return;
+    }
+    auto directions = ContourDirections(winding);
+    if (winding.getFillType() != pk::SkPathFillType::kWinding || directions != expected) {
+      std::string detail = "contour directions were:";
+      for (int direction : directions) {
+        detail += " " + std::to_string(direction);
+      }
+      Report(false, name, detail.c_str());
+      return;
+    }
+    Report(true, name, "");
+  };
+  {
+    pk::SkPath source;
+    source.setFillType(pk::SkPathFillType::kEvenOdd);
+    source.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCCW);
+    check(source, {1}, "NormalizedSingleContour");
+  }
+  {
+    pk::SkPath source;
+    source.setFillType(pk::SkPathFillType::kEvenOdd);
+    source.addRect(pk::SkRect::MakeLTRB(0, 0, 400, 400), pk::SkPathDirection::kCW);
+    source.addRect(pk::SkRect::MakeLTRB(600, 0, 1000, 400), pk::SkPathDirection::kCCW);
+    check(source, {1, 1}, "NormalizedIsolatedOutermost");
+  }
+  {
+    pk::SkPath source;
+    source.setFillType(pk::SkPathFillType::kEvenOdd);
+    source.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+    source.addRect(pk::SkRect::MakeLTRB(200, 200, 800, 800), pk::SkPathDirection::kCCW);
+    source.addRect(pk::SkRect::MakeLTRB(1200, 0, 2200, 1000), pk::SkPathDirection::kCCW);
+    source.addRect(pk::SkRect::MakeLTRB(1400, 200, 2000, 800), pk::SkPathDirection::kCW);
+    check(source, {1, -1, 1, -1}, "NormalizedCountersFollowParent");
+  }
+  // The decagon and pentagon touch at five vertices; the pentagon is a hole, not an island.
+  check(MakeTouchingContours(), {1, -1}, "NormalizedTouchingContours");
+}
+
 // The same conic traced out and back, so the two arcs cancel. No amount of refinement can put the
 // error bound below an area of zero, so the direction has to be reported as undecidable rather than
 // guessed, and the result has to be left alone -- a silent failure would hand back an outline that
@@ -324,6 +448,7 @@ int main() {
   }
   TestInverseFillType();
   TestWindingIsLeftAlone();
+  TestNormalizedDirections();
   TestRejectsUndecidableConicDirection();
   TestNonFiniteFails();
   std::printf("--- pk::SkOpBuilder::resolve (informational) ---\n");

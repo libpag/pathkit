@@ -42,6 +42,11 @@ struct Contour {
     vector<Contour*> fChildren;
     const SkRect fBounds;
     SkPoint fMinXY{PK_ScalarMax, PK_ScalarMax};
+    // A point on the contour that is not one of its vertices. A containment ray cast from the
+    // left-most vertex fails when that vertex is shared with the container: winding at a point on
+    // the container's boundary is undefined, and the edge through it falls on the ray's end and
+    // is discarded. The middle of the left-most edge cannot be a shared vertex.
+    SkPoint fSample{PK_ScalarMax, PK_ScalarMax};
     const int fVerbStart;
     const int fVerbEnd;
     Direction fDirection{Direction::kNone};
@@ -441,6 +446,7 @@ public:
         }
         if (minXY.fX < contour.fMinXY.fX) {
             contour.fMinXY = minXY;
+            contour.fSample = (*CurvePointAtT[verb])(pts, weight, 0.5);
         }
         return 0;
     }
@@ -491,15 +497,17 @@ public:
     }
 
     bool containerContains(Contour& contour, Contour& test) {
-        // find outside point on lesser contour
-        // arbitrarily, choose non-horizontal edge where point <= bounds left
-        // note that if leftmost point is control point, may need tight bounds
-            // to find edge with minimum-x
-        if (PK_ScalarMax == test.fMinXY.fX) {
+        // The ray starts inside the left-most edge rather than at its end. Two contours that touch
+        // at a vertex share that point, and winding at a boundary point is undefined: the
+        // container's edge through it intersects the ray exactly at its end and is dropped, so
+        // the counter reads as external and is never reversed. A point in the middle of an edge
+        // cannot be a vertex shared with another contour.
+        if (PK_ScalarMax == test.fSample.fX) {
             this->nextEdge(test, Edge::kInitial);
         }
-        // find all edges on greater equal or to the left of one on lesser
-        contour.fMinXY = test.fMinXY;
+        // fMinXY stays scratch space for the query. Keeping the ray point separate also means a
+        // contour that was used as a container earlier still has the point it needs as a test.
+        contour.fMinXY = PK_ScalarMax == test.fSample.fX ? test.fMinXY : test.fSample;
         int winding = this->nextEdge(contour, Edge::kCompare);
         // if edge is up, mark contour cw, otherwise, ccw
         // sum of greater edges direction should be cw, 0, ccw
@@ -543,7 +551,16 @@ public:
 
     bool markReverse(Contour* parent, Contour* child) {
         bool reversed = false;
-        if (parent && parent->fDirection == child->fDirection) {
+        if (!parent) {
+            // A normalized outline runs every outermost contour clockwise, the way a stroker emits
+            // it. Writing that direction back before descending is what makes the comparison
+            // below turn the counters inside it the other way, whatever direction they came in.
+            if (child->fDirection == Contour::Direction::kCCW) {
+                child->fReverse = true;
+                child->fDirection = Contour::Direction::kCW;
+                reversed = true;
+            }
+        } else if (parent->fDirection == child->fDirection) {
             child->fReverse = true;
             child->fDirection = (Contour::Direction) -(int) child->fDirection;
             reversed = true;
@@ -633,7 +650,7 @@ bool AsWinding(const SkPath& path, SkPath* result) {
     }
     fillType = path.isInverseFillType() ? SkPathFillType::kInverseWinding :
             SkPathFillType::kWinding;
-    if (path.isEmpty() || path.isConvex()) {
+    if (path.isEmpty()) {
         return set_result_path(result, path, fillType);
     }
     // count contours
@@ -641,24 +658,17 @@ bool AsWinding(const SkPath& path, SkPath* result) {
     OpAsWinding winder(path);
     winder.contourBounds(&contours);
     winder.contourAreas(contours);
-    // Checked before the single-contour shortcut below, because that shortcut is exactly the case
-    // that cannot be decided: one contour has nothing to be nested in, so it is taken as already
-    // consistent and returned untouched. A contour that doubles back on itself is one contour too.
+    // A contour that doubles back on itself encloses nothing, so no direction can be attributed
+    // to it. That has to be reported before any nesting is assumed, including for a lone contour.
     if (!winder.contourDirections(contours)) {
         return false;
     }
-    if (contours.size() <= 1) {
-        return set_result_path(result, path, fillType);
-    }
+    // No shortcut from here on. Even one contour, or a set of outermost contours with no counters
+    // inside them, may be running counter-clockwise and needs normalizing to clockwise.
     // create contour bounding box tree
     Contour sorted(SkRect(), 0, 0);
     for (auto& contour : contours) {
         winder.inParent(contour, sorted);
-    }
-    // if sorted has no grandchildren, no child has to fix its children's winding
-    if (std::all_of(sorted.fChildren.begin(), sorted.fChildren.end(),
-            [](const Contour* contour) -> bool { return !contour->fChildren.size(); } )) {
-        return set_result_path(result, path, fillType);
     }
     // starting with outermost and moving inward, see if one path contains another
     for (auto contour : sorted.fChildren) {

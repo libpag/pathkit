@@ -72,6 +72,14 @@ bool PK_API TightBounds(const SkPath& path, SkRect* result);
     contain self-crossings or cross other contours; in these cases, may return
     true even though result does not fill same area as path.
 
+    Every outermost contour in the result runs clockwise and the contours inside
+    it run the other way, so the geometry itself carries the orientation instead
+    of only the fill rule. Contours that touch at a vertex are supported. A path
+    already using a winding fill type is returned unchanged. Callers that append
+    normalized outlines together should require that the input contours neither
+    self-cross nor cross one another, since normalizing their orientation can
+    otherwise change the area that is filled.
+
     Returns true if operation was able to produce a result;
     otherwise, result is unmodified. The result may be the input.
 
