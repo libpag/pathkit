@@ -7,6 +7,10 @@
  * because the conversion must not rebuild the geometry -- only reverse contours -- so a counter a
  * fraction of a unit wide has to survive even though pathops quantises coordinates that finely.
  *
+ * Contours that meet at a vertex or share an edge are here too: a containment ray cast from a
+ * point on the container's boundary has no defined winding, so the conversion has to retry
+ * elsewhere or give up rather than hand back an outline that fills the wrong area.
+ *
  * The conversion also normalizes orientation: every outermost contour ends up clockwise and every
  * counter counter-clockwise. Those cases are checked separately from the probe cases, because
  * normalizing contours that cross each other can change the filled area, which is outside what
@@ -249,6 +253,102 @@ pk::SkPath MakeTouchingContours() {
   return path;
 }
 
+// A T-junction: the outer contour's concave vertex (200,400) is also the midpoint of the inner
+// rectangle's left edge. An edge midpoint picked there still puts the ray's origin on the
+// container's boundary, so the containment test has to fall back to another point on the outline.
+// The offset replays the same geometry far from the origin, where a float's ulp is already 1.
+// vertexX lets the notch corner be nudged off the inner edge's midpoint by one ULP.
+pk::SkPath MakeTJunction(float offset = 0.0f, float vertexX = 200.0f) {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.moveTo(offset, offset);
+  path.lineTo(offset + 1000, offset);
+  path.lineTo(offset + 1000, offset + 1000);
+  path.lineTo(offset, offset + 1000);
+  path.lineTo(offset, offset + 600);
+  path.lineTo(offset + vertexX, offset + 400);
+  path.lineTo(offset, offset + 200);
+  path.close();
+  path.addRect(pk::SkRect::MakeLTRB(offset + 200, offset + 200, offset + 800, offset + 600),
+               pk::SkPathDirection::kCW);
+  return path;
+}
+
+// The inner rectangle shares the outer's left edge, so its left-most edge's midpoint (0,400)
+// sits on a vertical edge of the container. An edge whose left bound merely equals the ray's x
+// used to be skipped outright, which read the counter as an independent island.
+pk::SkPath MakeSharedLeftEdge() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+  path.addRect(pk::SkRect::MakeLTRB(0, 200, 800, 600), pk::SkPathDirection::kCW);
+  return path;
+}
+
+// A rectangular notch instead of a V: the inner rectangle's left-edge midpoint (200,400) is a
+// corner where a horizontal and a vertical edge of the container meet. Several dyadic retries
+// along that same edge are still on the boundary, so the test has to keep looking.
+pk::SkPath MakeNotchedTJunction() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.moveTo(0, 0);
+  path.lineTo(1000, 0);
+  path.lineTo(1000, 1000);
+  path.lineTo(0, 1000);
+  path.lineTo(0, 600);
+  path.lineTo(200, 600);
+  path.lineTo(200, 400);
+  path.lineTo(0, 400);
+  path.close();
+  path.addRect(pk::SkRect::MakeLTRB(200, 200, 800, 600), pk::SkPathDirection::kCW);
+  return path;
+}
+
+// The inner outline's left edge coincides with the container's, so every retry sample on that
+// side is on the boundary. The test has to use samples off it, including on the curved right
+// edge, which exercises CurvePointAtT with a conic weight on the slow path.
+pk::SkPath MakeCurvedSharedLeftEdge() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+  path.moveTo(0, 200);
+  path.lineTo(800, 200);
+  path.conicTo(1000, 400, 800, 600, 0.70710678f);
+  path.lineTo(0, 600);
+  path.close();
+  return path;
+}
+
+// The inner rectangle shares both vertical sides of the container, so every sample on those sides
+// is on the boundary. Only its horizontal edges hold points strictly inside; a retry pass that
+// skips horizontal edges would give up even though a usable ray exists.
+pk::SkPath MakeHorizontalInterior() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+  path.addRect(pk::SkRect::MakeLTRB(0, 200, 1000, 600), pk::SkPathDirection::kCW);
+  return path;
+}
+
+// A C-shaped container with a notch cut in from the right. The inner rectangle's left edge runs
+// along the notch, so its midpoint is on the boundary; part of that contour is inside and part
+// is in the notch, so rays from different points disagree and the conversion has to give up.
+pk::SkPath MakeCrossingContour() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.moveTo(0, 0);
+  path.lineTo(1000, 0);
+  path.lineTo(1000, 400);
+  path.lineTo(400, 400);
+  path.lineTo(400, 600);
+  path.lineTo(1000, 600);
+  path.lineTo(1000, 1000);
+  path.lineTo(0, 1000);
+  path.close();
+  path.addRect(pk::SkRect::MakeLTRB(400, 200, 800, 800), pk::SkPathDirection::kCW);
+  return path;
+}
+
 std::vector<Case> MakeCases() {
   std::vector<Case> cases;
   cases.push_back({"SingleRing", MakeRing(0, 0, 1000, 1000, 200, 200, 800, 800),
@@ -275,6 +375,29 @@ std::vector<Case> MakeCases() {
   cases.push_back({"CurvedNestedThreeLevels", MakeCurvedNested(), {60, 500, 220, 500, 500, 500}});
   cases.push_back({"TouchingContours", MakeTouchingContours(),
                    {500, 500, 500, 150, 850, 500, 150, 500, 0, 0}});
+  cases.push_back({"TJunction", MakeTJunction(),
+                   {500, 400, 900, 400, 100, 400, 500, 100}});
+  cases.push_back({"SharedLeftEdge", MakeSharedLeftEdge(),
+                   {500, 400, 900, 400, 100, 100}});
+  cases.push_back({"NotchedTJunction", MakeNotchedTJunction(),
+                   {500, 450, 900, 450, 100, 500, 500, 100}});
+  {
+    const float origin = 1e7f;
+    // Boundary comparisons are scaled to coordinate magnitude, so the shared vertex is still
+    // recognized at this scale without rejecting unrelated samples.
+    cases.push_back({"TJunctionFarFromOrigin", MakeTJunction(origin),
+                     {origin + 500, origin + 400, origin + 900, origin + 400,
+                      origin + 100, origin + 400, origin + 500, origin + 100}});
+  }
+  // The two outlines reach the shared vertex through different computations, so their coordinates
+  // differ by one float ULP. The ray still starts on the boundary and must be rejected.
+  cases.push_back({"TJunctionNudgedVertex",
+                   MakeTJunction(0.0f, std::nextafter(200.0f, 300.0f)),
+                   {500, 400, 900, 400, 100, 400, 500, 100}});
+  cases.push_back({"CurvedSharedLeftEdge", MakeCurvedSharedLeftEdge(),
+                   {400, 400, 950, 400, 100, 100}});
+  cases.push_back({"HorizontalInterior", MakeHorizontalInterior(),
+                   {500, 400, 500, 100, 500, 900}});
   return cases;
 }
 
@@ -408,6 +531,13 @@ void TestNormalizedDirections() {
   }
   // The decagon and pentagon touch at five vertices; the pentagon is a hole, not an island.
   check(MakeTouchingContours(), {1, -1}, "NormalizedTouchingContours");
+  check(MakeTJunction(), {1, -1}, "NormalizedTJunction");
+  check(MakeSharedLeftEdge(), {1, -1}, "NormalizedSharedLeftEdge");
+  check(MakeNotchedTJunction(), {1, -1}, "NormalizedNotchedTJunction");
+  check(MakeTJunction(1e7f), {1, -1}, "NormalizedTJunctionFarFromOrigin");
+  check(MakeTJunction(0.0f, std::nextafter(200.0f, 300.0f)), {1, -1},
+        "NormalizedTJunctionNudgedVertex");
+  check(MakeHorizontalInterior(), {1, -1}, "NormalizedHorizontalInterior");
 }
 
 // The same conic traced out and back, so the two arcs cancel. No amount of refinement can put the
@@ -438,6 +568,49 @@ void TestNonFiniteFails() {
   Report(winding == before, "NonFiniteFails", "a failed call overwrote the result");
 }
 
+// Two copies of the same rectangle fill nothing under even-odd, and every point of one outline
+// lies on the other's boundary. No ray can be trusted, so the conversion has to give up and leave
+// the result alone rather than hand back a winding outline it cannot justify.
+void TestRejectsCoincidentContours() {
+  pk::SkPath source;
+  source.setFillType(pk::SkPathFillType::kEvenOdd);
+  source.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+  source.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+  pk::SkPath winding = MakeRing(0, 0, 100, 100, 20, 20, 80, 80);
+  auto before = winding;
+  Report(!pk::AsWinding(source, &winding), "CoincidentContours", "returned true");
+  Report(winding == before, "CoincidentContours", "a failed call overwrote the result");
+}
+
+// The T-junction reported against an earlier version: (200,400) is both the outer contour's
+// concave vertex and the midpoint of the inner rectangle's left edge. Pin down the exact failure
+// instead of only comparing the two paths with each other.
+void TestTJunctionKeepsHole() {
+  auto source = MakeTJunction();
+  pk::SkPath winding;
+  if (!pk::AsWinding(source, &winding)) {
+    Report(false, "TJunctionKeepsHole", "AsWinding() returned false");
+    return;
+  }
+  Report(!source.contains(500, 400), "TJunctionKeepsHole", "even-odd source filled the hole");
+  Report(winding.getFillType() == pk::SkPathFillType::kWinding, "TJunctionKeepsHole",
+         "the fill type was not changed to winding");
+  Report(!winding.contains(500, 400), "TJunctionKeepsHole", "the centre hole was filled in");
+  Report(source.contains(900, 400) && winding.contains(900, 400), "TJunctionKeepsHole",
+         "the area around the hole was lost");
+  Report(!source.contains(100, 400) && !winding.contains(100, 400), "TJunctionKeepsHole",
+         "the notch was filled in");
+}
+
+// Samples on opposite sides of the notch report different windings, so no single containment
+// answer is defensible. The call has to fail and leave the result alone.
+void TestRejectsCrossingContour() {
+  pk::SkPath winding = MakeRing(0, 0, 100, 100, 20, 20, 80, 80);
+  auto before = winding;
+  Report(!pk::AsWinding(MakeCrossingContour(), &winding), "CrossingContour", "returned true");
+  Report(winding == before, "CrossingContour", "a failed call overwrote the result");
+}
+
 }  // namespace
 
 int main() {
@@ -450,6 +623,9 @@ int main() {
   TestWindingIsLeftAlone();
   TestNormalizedDirections();
   TestRejectsUndecidableConicDirection();
+  TestRejectsCoincidentContours();
+  TestTJunctionKeepsHole();
+  TestRejectsCrossingContour();
   TestNonFiniteFails();
   std::printf("--- pk::SkOpBuilder::resolve (informational) ---\n");
   for (const auto& testCase : cases) {
