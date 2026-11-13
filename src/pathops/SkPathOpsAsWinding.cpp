@@ -8,6 +8,7 @@
 #include "src/core/SkPathPriv.h"
 #include "src/pathops/SkOpEdgeBuilder.h"
 #include "src/pathops/SkPathOpsCommon.h"
+#include "src/pathops/SkPathOpsPoint.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -42,6 +43,9 @@ struct Contour {
     vector<Contour*> fChildren;
     const SkRect fBounds;
     SkPoint fMinXY{PK_ScalarMax, PK_ScalarMax};
+    // Ray origin for the common case. Kept apart from fMinXY, which containment queries overwrite
+    // as scratch space, and stored per contour so it is computed once rather than once per query.
+    SkPoint fSample{PK_ScalarMax, PK_ScalarMax};
     const int fVerbStart;
     const int fVerbEnd;
     Direction fDirection{Direction::kNone};
@@ -58,6 +62,16 @@ struct Contour {
 static const int kPtCount[] = { 1, 1, 2, 2, 3, 0 };
 static const int kPtIndex[] = { 0, 1, 1, 1, 1, 0 };
 
+// Retry origins are the dyadic points along every edge of the test contour, generated one level
+// at a time: level L contributes (2k-1)/2^L, so L levels cover a grid of 2^L-1 points per edge.
+// Trying the coarse levels first keeps the common touching case cheap; refining instead of using
+// a fixed handful of fractions is what makes the search complete. A container edge that does not
+// coincide with a test edge meets it in only finitely many points, so a grid finer than that
+// finite set must contain a point off the boundary. Running out of levels means every edge of
+// the test outline lies on the container's boundary -- coincident outlines, for instance -- and
+// then no ray can be trusted.
+static constexpr int kMaxSampleLevel = 12;
+
 static Contour::Direction to_direction(SkScalar dy) {
     return dy > 0 ? Contour::Direction::kCCW : dy < 0 ? Contour::Direction::kCW :
             Contour::Direction::kNone;
@@ -71,7 +85,8 @@ static Contour::Direction direction_from_area(double area) {
     return (Contour::Direction) -(int) to_direction(area);
 }
 
-static int contains_edge(SkPoint pts[4], SkPath::Verb verb, SkScalar weight, const SkPoint& edge) {
+static int contains_edge(SkPoint pts[4], SkPath::Verb verb, SkScalar weight,
+                         const SkPoint& edge, bool* onBoundary) {
     SkRect bounds;
     bounds.setBounds(pts, kPtCount[verb] + 1);
     if (bounds.fTop > edge.fY) {
@@ -80,7 +95,13 @@ static int contains_edge(SkPoint pts[4], SkPath::Verb verb, SkScalar weight, con
     if (bounds.fBottom <= edge.fY) {  // check to see if y is at line end to avoid double counting
         return 0;
     }
-    if (bounds.fLeft >= edge.fX) {
+    // An edge whose left bound is at the ray's x may still begin on the ray. Let it through so
+    // the intercept test can report that boundary instead of silently skipping the whole edge.
+    // A sample one float ULP to the left of that bound is still on the boundary, so this
+    // pre-screen needs the same coordinate-scale comparison as the intercept test: the endpoint
+    // check in handleEdge() cannot catch a contact in the middle of an edge.
+    if (bounds.fLeft > edge.fX &&
+        !SkDPoint::ApproximatelyEqual(SkPoint::Make(bounds.fLeft, edge.fY), edge)) {
         return 0;
     }
     int winding = 0;
@@ -92,22 +113,18 @@ static int contains_edge(SkPoint pts[4], SkPath::Verb verb, SkScalar weight, con
     // remove results to the right of edge
     for (int index = 0; index < count; ) {
         SkScalar intersectX = (*CurvePointAtT[verb])(pts, weight, tVals[index]).fX;
+        // A shared vertex can be off by a float ULP when the two outlines reach it through
+        // different computations, so compare at coordinate scale. A ray starting on the boundary
+        // has no defined winding: guessing which side the edge leaves on cannot tell a concave
+        // notch from a convex nose meeting the ray at its end, so reject the ray outright.
+        if (SkDPoint::ApproximatelyEqual(SkPoint::Make(intersectX, edge.fY), edge)) {
+            *onBoundary = true;
+            return 0;
+        }
         if (intersectX < edge.fX) {
             ++index;
             continue;
         }
-        if (intersectX > edge.fX) {
-            tVals[index] = tVals[--count];
-            continue;
-        }
-        // if intersect x equals edge x, we need to determine if pts is to the left or right of edge
-        if (pts[0].fX < edge.fX && pts[kPtCount[verb]].fX < edge.fX) {
-            ++index;
-            continue;
-        }
-        // TODO : other cases need discriminating. need op angle code to figure it out
-        // example: edge ends 45 degree diagonal going up. If pts is to the left of edge, keep.
-        // if pts is to the right of edge, discard. With code as is, can't distiguish the two cases.
         tVals[index] = tVals[--count];
     }
     // use first derivative to determine if intersection is contributing +1 or -1 to winding
@@ -125,9 +142,9 @@ static int contains_edge(SkPoint pts[4], SkPath::Verb verb, SkScalar weight, con
     return winding;  // note winding indicates containership, not contour direction
 }
 
-// The left-most point of one edge. A containment test casts its ray from the left-most point of
-// the contour, so this is the only thing the edge is asked for; the direction the contour runs in
-// comes from its signed area instead.
+// The left-most point of one edge. kInitial uses it to pick the edge whose midpoint becomes the
+// contour's ray origin; the direction the contour runs in comes from its signed area instead, so
+// no tangent or sampling of the running direction is needed here.
 static SkPoint left_edge(SkPoint pts[4], SkPath::Verb verb, SkScalar weight) {
     PkASSERT(SkPath::kLine_Verb <= verb && verb <= SkPath::kCubic_Verb);
     SkPoint result;
@@ -276,6 +293,7 @@ public:
     enum class Edge {
         kInitial,
         kCompare,
+        kSample,
     };
 
     OpAsWinding(const SkPath& path)
@@ -417,10 +435,11 @@ public:
         }
     }
 
-    // Feeds one edge to the query in progress: either accumulating into the winding for a
-    // containment test, or updating the left-most point the next one is cast from.
+    // Feeds one edge to the query in progress: accumulating into the winding for a containment
+    // test, adding one dyadic grid of retry ray origins, or recording the left-most point and
+    // its midpoint. Only kInitial skips horizontal edges; retries need their interior points.
     int handleEdge(Contour& contour, Edge edge, SkPoint pts[4], SkPath::Verb verb,
-                   SkScalar weight) {
+                   SkScalar weight, bool* onBoundary) {
         bool horizontal = true;
         for (int index = 1; index <= kPtCount[verb]; ++index) {
             if (pts[0].fY != pts[index].fY) {
@@ -428,11 +447,42 @@ public:
                 break;
             }
         }
-        if (horizontal) {
+        if (edge == Edge::kCompare) {
+            const SkPoint& ray = contour.fMinXY;
+            const SkPoint& end = pts[kPtCount[verb]];
+            // A ray origin on an endpoint or along a horizontal edge sits on the container's
+            // boundary. Both would otherwise be missed: the half-open y interval and the
+            // horizontal-edge exit below skip these edges before any intercept is computed.
+            if (SkDPoint::ApproximatelyEqual(pts[0], ray) ||
+                SkDPoint::ApproximatelyEqual(end, ray)) {
+                *onBoundary = true;
+            }
+            if (horizontal) {
+                SkRect bounds;
+                bounds.setBounds(pts, kPtCount[verb] + 1);
+                // Compare y at coordinate scale: a sample computed on a curve can sit a float ULP
+                // away from a flat container edge and still be on that edge.
+                if (SkDPoint::ApproximatelyEqual(SkPoint::Make(ray.fX, pts[0].fY), ray) &&
+                    bounds.fLeft <= ray.fX && ray.fX <= bounds.fRight) {
+                    *onBoundary = true;
+                }
+                return 0;
+            }
+            return contains_edge(pts, verb, weight, ray, onBoundary);
+        }
+        // kInitial still ignores horizontal edges: their left-most point is a vertex, which may be
+        // shared with the container. kSample must include them, since a contour whose vertical
+        // edges all lie on the container boundary may have its only interior points on the
+        // horizontal ones.
+        if (horizontal && edge != Edge::kSample) {
             return 0;
         }
-        if (edge == Edge::kCompare) {
-            return contains_edge(pts, verb, weight, contour.fMinXY);
+        if (edge == Edge::kSample) {
+            int steps = 1 << fSampleLevel;
+            for (int index = 1; index < steps; index += 2) {
+                fSamples.push_back((*CurvePointAtT[verb])(pts, weight, (double) index / steps));
+            }
+            return 0;
         }
         PkASSERT(edge == Edge::kInitial);
         SkPoint minXY = left_edge(pts, verb, weight);
@@ -441,17 +491,19 @@ public:
         }
         if (minXY.fX < contour.fMinXY.fX) {
             contour.fMinXY = minXY;
+            contour.fSample = (*CurvePointAtT[verb])(pts, weight, 0.5);
         }
         return 0;
     }
 
-    int nextEdge(Contour& contour, Edge edge) {
+    int nextEdge(Contour& contour, Edge edge, bool* onBoundary = nullptr) {
         // Only this contour's verbs are walked. The range recorded by contourBounds() indexes the
         // raw verbs; SkPath::Iter with forceClose inserts the closing edge as an extra line, which
         // desynchronises the two counts: the first contour still sees its closing edge through the
         // range it was given, but every later one is short by the edges inserted before it and
         // loses its closing edge entirely.
         int winding = 0;
+        bool boundary = false;
         SkPoint startPoint = {};
         SkPoint lastPoint = {};
         bool started = false;
@@ -476,7 +528,7 @@ public:
             // The conic weight lives in a parallel array that only advances for conics, so it is
             // only meaningful for this verb.
             SkScalar weight = SkPathVerb::kConic == verb ? *fVerbs[current].weight : 1;
-            winding += handleEdge(contour, edge, pts, (SkPath::Verb) verb, weight);
+            winding += handleEdge(contour, edge, pts, (SkPath::Verb) verb, weight, &boundary);
             lastPoint = pts[kPtCount[(int) verb]];
         }
         // The edge back to the start is not in the verb list, but both rasterizing and contains()
@@ -485,24 +537,81 @@ public:
         // is what decides whether a counter gets reversed.
         if (started && (lastPoint.fX != startPoint.fX || lastPoint.fY != startPoint.fY)) {
             SkPoint pts[4] = {lastPoint, startPoint, {}, {}};
-            winding += handleEdge(contour, edge, pts, SkPath::kLine_Verb, 1);
+            winding += handleEdge(contour, edge, pts, SkPath::kLine_Verb, 1, &boundary);
+        }
+        if (onBoundary) {
+            *onBoundary = boundary;
         }
         return winding;
     }
 
     bool containerContains(Contour& contour, Contour& test) {
-        // find outside point on lesser contour
-        // arbitrarily, choose non-horizontal edge where point <= bounds left
-        // note that if leftmost point is control point, may need tight bounds
-            // to find edge with minimum-x
-        if (PK_ScalarMax == test.fMinXY.fX) {
+        // Any point of the test contour off the container's boundary reports the same winding, so
+        // the first such ray decides containment. The common case needs exactly one ray: fSample
+        // is computed once per contour, not once per query.
+        if (PK_ScalarMax == test.fSample.fX) {
             this->nextEdge(test, Edge::kInitial);
         }
-        // find all edges on greater equal or to the left of one on lesser
-        contour.fMinXY = test.fMinXY;
-        int winding = this->nextEdge(contour, Edge::kCompare);
-        // if edge is up, mark contour cw, otherwise, ccw
-        // sum of greater edges direction should be cw, 0, ccw
+        if (PK_ScalarMax == test.fSample.fX) {
+            // A contour without a non-horizontal edge has no point to cast a ray from.
+            return false;
+        }
+        contour.fMinXY = test.fSample;
+        bool onBoundary = false;
+        int winding = this->nextEdge(contour, Edge::kCompare, &onBoundary);
+        if (!onBoundary) {
+            test.fContained = winding != 0;
+            return -1 <= winding && winding <= 1;
+        }
+        // The first ray started on the container's boundary: a shared vertex, or a vertex sitting
+        // at the middle of the other contour's edge. Winding there is undefined, so retry at
+        // dyadic points along every edge of the test outline, coarsest grid first. Every ray in a
+        // grid must agree: one exterior sample among them means the outlines cross and no single
+        // containment answer could be justified.
+        fSamples.clear();
+        bool found = false;
+        bool crossed = false;
+        SkPoint first = {};
+        int reference = 0;
+        int samples = 0;
+        for (int level = 1; level <= kMaxSampleLevel && samples < 2 && !crossed; ++level) {
+            fSampleLevel = level;
+            size_t start = fSamples.size();
+            this->nextEdge(test, Edge::kSample);
+            // Sort just this level's points, so coarse grids are always tried before finer ones.
+            // The y tie-break makes the retry order fixed across standard libraries.
+            std::sort(fSamples.begin() + start, fSamples.end(),
+                      [](const SkPoint& a, const SkPoint& b) {
+                          return a.fX != b.fX ? a.fX < b.fX : a.fY < b.fY;
+                      });
+            for (size_t index = start; index < fSamples.size() && !crossed; ++index) {
+                const SkPoint& sample = fSamples[index];
+                contour.fMinXY = sample;
+                onBoundary = false;
+                int sampleWinding = this->nextEdge(contour, Edge::kCompare, &onBoundary);
+                if (onBoundary) {
+                    continue;
+                }
+                if (found && SkDPoint::ApproximatelyEqual(first, sample)) {
+                    continue;
+                }
+                if (!found) {
+                    found = true;
+                    first = sample;
+                    reference = sampleWinding;
+                } else if (sampleWinding != reference) {
+                    crossed = true;
+                    break;
+                }
+                ++samples;
+                winding = sampleWinding;
+            }
+        }
+        if (crossed || samples < 2) {
+            // Either the outlines cross, or too few grid points lie off the boundary (coincident
+            // outlines are one case). Report failure instead of guessing a direction.
+            return false;
+        }
         test.fContained = winding != 0;
         return -1 <= winding && winding <= 1;
     }
@@ -528,8 +637,8 @@ public:
     }
 
     bool checkContainerChildren(Contour* parent, Contour* child) {
-        // Initialize this contour before it is used as a container: containment queries reuse
-        // the container's fMinXY as scratch storage, not as its initial-edge sentinel.
+        // Containment queries reuse the container's fMinXY as scratch storage for the ray origin.
+        // A contour's own origin lives in fSample, so acting as a container cannot clobber it.
         if (parent && !containerContains(*parent, *child)) {
             return false;
         }
@@ -543,7 +652,16 @@ public:
 
     bool markReverse(Contour* parent, Contour* child) {
         bool reversed = false;
-        if (parent && parent->fDirection == child->fDirection) {
+        if (!parent) {
+            // A normalized outline runs every outermost contour clockwise, the way a stroker emits
+            // it. Writing that direction back before descending is what makes the comparison
+            // below turn the counters inside it the other way, whatever direction they came in.
+            if (child->fDirection == Contour::Direction::kCCW) {
+                child->fReverse = true;
+                child->fDirection = Contour::Direction::kCW;
+                reversed = true;
+            }
+        } else if (parent->fDirection == child->fDirection) {
             child->fReverse = true;
             child->fDirection = (Contour::Direction) -(int) child->fDirection;
             reversed = true;
@@ -614,6 +732,10 @@ private:
     // The conics of every contour, in contour order, so a contour only has to remember where its
     // own run starts.
     vector<ConicPiece> fConics = {};
+    // Retry ray origins, collected from the test outline only when the first ray hit a boundary.
+    // fSampleLevel says which dyadic grid kSample is to add, so retries go coarse-to-fine.
+    vector<SkPoint> fSamples = {};
+    int fSampleLevel = 1;
 };
 
 static bool set_result_path(SkPath* result, const SkPath& path, SkPathFillType fillType) {
@@ -633,7 +755,7 @@ bool AsWinding(const SkPath& path, SkPath* result) {
     }
     fillType = path.isInverseFillType() ? SkPathFillType::kInverseWinding :
             SkPathFillType::kWinding;
-    if (path.isEmpty() || path.isConvex()) {
+    if (path.isEmpty()) {
         return set_result_path(result, path, fillType);
     }
     // count contours
@@ -641,28 +763,21 @@ bool AsWinding(const SkPath& path, SkPath* result) {
     OpAsWinding winder(path);
     winder.contourBounds(&contours);
     winder.contourAreas(contours);
-    // Checked before the single-contour shortcut below, because that shortcut is exactly the case
-    // that cannot be decided: one contour has nothing to be nested in, so it is taken as already
-    // consistent and returned untouched. A contour that doubles back on itself is one contour too.
+    // A contour that doubles back on itself encloses nothing, so no direction can be attributed
+    // to it. That has to be reported before any nesting is assumed, including for a lone contour.
     if (!winder.contourDirections(contours)) {
         return false;
     }
-    if (contours.size() <= 1) {
-        return set_result_path(result, path, fillType);
-    }
+    // No shortcut from here on. Even one contour, or a set of outermost contours with no counters
+    // inside them, may be running counter-clockwise and needs normalizing to clockwise.
     // create contour bounding box tree
     Contour sorted(SkRect(), 0, 0);
     for (auto& contour : contours) {
         winder.inParent(contour, sorted);
     }
-    // if sorted has no grandchildren, no child has to fix its children's winding
-    if (std::all_of(sorted.fChildren.begin(), sorted.fChildren.end(),
-            [](const Contour* contour) -> bool { return !contour->fChildren.size(); } )) {
-        return set_result_path(result, path, fillType);
-    }
-    // starting with outermost and moving inward, see if one path contains another
+    // starting with outermost and moving inward, see if one path contains another. Outermost
+    // contours are only ever containers, so their ray origin is never needed.
     for (auto contour : sorted.fChildren) {
-        winder.nextEdge(*contour, OpAsWinding::Edge::kInitial);
         if (!winder.checkContainerChildren(nullptr, contour)) {
             return false;
         }
