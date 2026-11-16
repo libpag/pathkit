@@ -349,6 +349,65 @@ pk::SkPath MakeCrossingContour() {
   return path;
 }
 
+// A C-shaped outline G holds a smaller C-shaped outline P, both with their notches opening right.
+// X sits in the notch of both, so it is an island even though its bounds put it under P in the
+// bbox tree. P does not contain X, and neither does G, so X has no container at all: it has to be
+// normalized clockwise like any outermost contour instead of being compared against G.
+pk::SkPath MakeBBoxParentNotch() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.moveTo(0, 0);
+  path.lineTo(1000, 0);
+  path.lineTo(1000, 300);
+  path.lineTo(400, 300);
+  path.lineTo(400, 800);
+  path.lineTo(1000, 800);
+  path.lineTo(1000, 1000);
+  path.lineTo(0, 1000);
+  path.close();
+  path.moveTo(50, 50);
+  path.lineTo(950, 50);
+  path.lineTo(950, 250);
+  path.lineTo(380, 250);
+  path.lineTo(380, 850);
+  path.lineTo(950, 850);
+  path.lineTo(950, 950);
+  path.lineTo(50, 950);
+  path.close();
+  path.addRect(pk::SkRect::MakeLTRB(600, 600, 700, 700), pk::SkPathDirection::kCCW);
+  return path;
+}
+
+// Four outlines: a rect G, a C-shape A inside it, a C-shape P inside A, and a 100 by 100 square
+// X (signed area -10000) in the notch of both A and P. X's bbox parent is P, but the only outline
+// that really contains X is G, two levels further up. Comparing X against the grandparent A
+// gives it the wrong direction and fills (650,650), which even-odd leaves open.
+pk::SkPath MakeAncestorContainer() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+  path.moveTo(100, 100);
+  path.lineTo(100, 900);
+  path.lineTo(900, 900);
+  path.lineTo(900, 800);
+  path.lineTo(400, 800);
+  path.lineTo(400, 300);
+  path.lineTo(900, 300);
+  path.lineTo(900, 100);
+  path.close();
+  path.moveTo(150, 150);
+  path.lineTo(850, 150);
+  path.lineTo(850, 250);
+  path.lineTo(350, 250);
+  path.lineTo(350, 850);
+  path.lineTo(850, 850);
+  path.lineTo(850, 890);
+  path.lineTo(150, 890);
+  path.close();
+  path.addRect(pk::SkRect::MakeLTRB(600, 600, 700, 700), pk::SkPathDirection::kCCW);
+  return path;
+}
+
 std::vector<Case> MakeCases() {
   std::vector<Case> cases;
   cases.push_back({"SingleRing", MakeRing(0, 0, 1000, 1000, 200, 200, 800, 800),
@@ -398,6 +457,10 @@ std::vector<Case> MakeCases() {
                    {400, 400, 950, 400, 100, 100}});
   cases.push_back({"HorizontalInterior", MakeHorizontalInterior(),
                    {500, 400, 500, 100, 500, 900}});
+  cases.push_back({"BBoxParentNotch", MakeBBoxParentNotch(),
+                   {650, 650, 200, 150, 200, 500, 900, 900, 10, 10, 500, 500}});
+  cases.push_back({"AncestorContainer", MakeAncestorContainer(),
+                   {650, 650, 200, 200, 200, 500, 500, 500, 950, 500, 50, 50}});
   return cases;
 }
 
@@ -538,6 +601,10 @@ void TestNormalizedDirections() {
   check(MakeTJunction(0.0f, std::nextafter(200.0f, 300.0f)), {1, -1},
         "NormalizedTJunctionNudgedVertex");
   check(MakeHorizontalInterior(), {1, -1}, "NormalizedHorizontalInterior");
+  // X is nested in the bbox tree but in no outline at all: it is still an outermost contour.
+  check(MakeBBoxParentNotch(), {1, -1, 1}, "NormalizedBBoxParentNotch");
+  // Only G contains X. Stopping at the grandparent A would turn X the wrong way.
+  check(MakeAncestorContainer(), {1, -1, 1, -1}, "NormalizedAncestorContainer");
 }
 
 // The same conic traced out and back, so the two arcs cancel. No amount of refinement can put the
@@ -611,6 +678,25 @@ void TestRejectsCrossingContour() {
   Report(winding == before, "CrossingContour", "a failed call overwrote the result");
 }
 
+// (650,650) is inside G and X under even-odd, so it is a hole. X's bbox parent P does not contain
+// it; the only real container is G, two levels further up. Comparing X against A instead reverses
+// it and fills the hole.
+void TestAncestorContainerKeepsHole() {
+  auto source = MakeAncestorContainer();
+  pk::SkPath winding;
+  if (!pk::AsWinding(source, &winding)) {
+    Report(false, "AncestorContainerKeepsHole", "AsWinding() returned false");
+    return;
+  }
+  Report(!source.contains(650, 650), "AncestorContainerKeepsHole",
+         "even-odd source filled the hole");
+  Report(winding.getFillType() == pk::SkPathFillType::kWinding, "AncestorContainerKeepsHole",
+         "the fill type was not changed to winding");
+  Report(!winding.contains(650, 650), "AncestorContainerKeepsHole", "the hole was filled in");
+  Report(source.contains(200, 200) && winding.contains(200, 200), "AncestorContainerKeepsHole",
+         "the area around the hole was lost");
+}
+
 }  // namespace
 
 int main() {
@@ -626,6 +712,7 @@ int main() {
   TestRejectsCoincidentContours();
   TestTJunctionKeepsHole();
   TestRejectsCrossingContour();
+  TestAncestorContainerKeepsHole();
   TestNonFiniteFails();
   std::printf("--- pk::SkOpBuilder::resolve (informational) ---\n");
   for (const auto& testCase : cases) {
