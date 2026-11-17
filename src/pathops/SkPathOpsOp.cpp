@@ -10,6 +10,7 @@
 #include "src/pathops/SkPathOpsCommon.h"
 #include "src/pathops/SkPathWriter.h"
 
+#include <algorithm>
 #include <utility>
 
 #if DEBUG_T_SECT_LOOP_COUNT
@@ -25,17 +26,25 @@ static bool findChaseOp(SkTDArray<SkOpSpanBase*>& chase, SkOpSpanBase** startPtr
         // OPTIMIZE: prev makes this compatible with old code -- but is it necessary?
         *startPtr = span->ptT()->prev()->span();
         SkOpSegment* segment = (*startPtr)->segment();
+        // Skip if the segment is already done to avoid infinite loop.
+        if (segment->done()) {
+            continue;
+        }
         bool done = true;
         *endPtr = nullptr;
         if (SkOpAngle* last = segment->activeAngle(*startPtr, startPtr, endPtr, &done)) {
             *startPtr = last->start();
             *endPtr = last->end();
+            SkOpSegment* lastSegment = last->segment();
+            // Only re-add span to chase if the target segment is not done.
+            if (!lastSegment->done()) {
    #if TRY_ROTATE
-            *chase.insert(0) = span;
+                *chase.insert(0) = span;
    #else
-            *chase.append() = span;
+                *chase.append() = span;
    #endif
-            *result = last->segment();
+            }
+            *result = lastSegment;
             return true;
         }
         if (done) {
@@ -98,11 +107,14 @@ static bool findChaseOp(SkTDArray<SkOpSpanBase*>& chase, SkOpSpanBase** startPtr
             }
         }
         if (first) {
+            // Only re-add span to chase if first segment is not done.
+            if (!first->done()) {
        #if TRY_ROTATE
-            *chase.insert(0) = span;
+                *chase.insert(0) = span;
        #else
-            *chase.append() = span;
+                *chase.append() = span;
        #endif
+            }
             *result = first;
             return true;
         }
@@ -113,10 +125,30 @@ static bool findChaseOp(SkTDArray<SkOpSpanBase*>& chase, SkOpSpanBase** startPtr
 
 static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
         const int xorMask, const int xorOpMask, SkPathWriter* writer) {
+    // Count contours and segments for dynamic loop limits
+    int totalContours = 0;
+    int totalSegments = 0;
+    SkOpContour* contour = contourList;
+    while (contour) {
+        ++totalContours;
+        totalSegments += contour->count();
+        contour = contour->next();
+    }
+    // Set loop limits based on what each loop processes
+    const int kMinLoops = 100;
+    const int kMultiplier = 10;
+    // Outer loop: processes contours, limit based on contour count
+    const int maxOuterLoops = std::max(kMinLoops, totalContours * kMultiplier);
+    // Curve loop: traverses segments, limit based on segment count
+    const int maxCurveLoops = std::max(kMinLoops, totalSegments * kMultiplier);
     bool unsortable = false;
     bool lastSimple = false;
     bool simple = false;
+    int outerLoopCount = 0;
     do {
+        if (++outerLoopCount > maxOuterLoops) {
+            break;
+        }
         SkOpSpan* span = FindSortableTop(contourList);
         if (!span) {
             break;
@@ -125,9 +157,26 @@ static bool bridgeOp(SkOpContourHead* contourList, const SkPathOp op,
         SkOpSpanBase* start = span->next();
         SkOpSpanBase* end = span;
         SkTDArray<SkOpSpanBase*> chase;
+        // Calculate span count for current contour to set inner loop limit
+        int currentContourSpans = 0;
+        SkOpContour* currentContour = current->contour();
+        SkOpSegment* seg = currentContour->first();
+        while (seg) {
+            currentContourSpans += seg->count();
+            seg = seg->next();
+        }
+        const int maxInnerLoops = std::max(kMinLoops, currentContourSpans * kMultiplier);
+        int innerLoopCount = 0;
         do {
+            if (++innerLoopCount > maxInnerLoops) {
+                break;
+            }
             if (current->activeOp(start, end, xorMask, xorOpMask, op)) {
+                int curveLoopCount = 0;
                 do {
+                    if (++curveLoopCount > maxCurveLoops) {
+                        break;
+                    }
                     if (!unsortable && current->done()) {
                         break;
                     }
@@ -371,6 +420,8 @@ bool OpDebug(const SkPath& one, const SkPath& two, SkPathOp op, SkPath* result
 }
 
 bool Op(const SkPath& one, const SkPath& two, SkPathOp op, SkPath* result) {
+    printf("[DEBUG] Op(): called with op=%d\n", static_cast<int>(op));
+    fflush(stdout);
 #if DEBUG_DUMP_VERIFY
     if (SkPathOpsDebug::gVerifyOp) {
         if (!OpDebug(one, two, op, result  PkDEBUGPARAMS(false) PkDEBUGPARAMS(nullptr))) {

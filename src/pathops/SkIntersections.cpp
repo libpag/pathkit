@@ -45,7 +45,12 @@ int SkIntersections::insert(double one, double two, const SkDPoint& pt) {
         if (one == oldOne && two == oldTwo) {
             return -1;
         }
-        if (more_roughly_equal(oldOne, one) && more_roughly_equal(oldTwo, two)) {
+        // Check if T values are close enough to merge
+        bool tValuesClose = more_roughly_equal(oldOne, one) && more_roughly_equal(oldTwo, two);
+        // Check if coordinates are very close (for near-tangent curves where T values
+        // may differ more but coordinates are nearly identical)
+        bool coordsClose = pt.approximatelyEqual(fPt[index]);
+        if (tValuesClose || coordsClose) {
             if ((!precisely_zero(one) || precisely_zero(oldOne))
                     && (!precisely_equal(one, 1) || precisely_equal(oldOne, 1))
                     && (!precisely_zero(two) || precisely_zero(oldTwo))

@@ -317,8 +317,8 @@ const double FLT_EPSILON_INVERSE = 1 / FLT_EPSILON;
 const double DBL_EPSILON_ERR = DBL_EPSILON * 4;  // FIXME: tune -- allow a few bits of error
 const double DBL_EPSILON_SUBDIVIDE_ERR = DBL_EPSILON * 16;
 const double ROUGH_EPSILON = FLT_EPSILON * 64;
-const double MORE_ROUGH_EPSILON = FLT_EPSILON * 256;
-const double WAY_ROUGH_EPSILON = FLT_EPSILON * 2048;
+const double MORE_ROUGH_EPSILON = FLT_EPSILON * 8192;  // Increased from 256 for near-tangent curves
+const double WAY_ROUGH_EPSILON = FLT_EPSILON * 16384;
 const double BUMP_EPSILON = FLT_EPSILON * 4096;
 
 const SkScalar INVERSE_NUMBER_RANGE = FLT_EPSILON_ORDERABLE_ERR;
