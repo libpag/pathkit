@@ -408,6 +408,44 @@ pk::SkPath MakeAncestorContainer() {
   return path;
 }
 
+// G is an L whose notch opens to the upper right. H is a bar lying in that notch but reaching
+// past G's bounds, so neither bounds contains the other's. X is inside H only. Both G and H have
+// bounds that contain X, but inParent() hangs X under whichever comes first: with G first its
+// real container H is a sibling branch, not an ancestor. Treating X as outermost then makes it
+// run the same way as H and silently fills (650,600), even though even-odd leaves it open.
+pk::SkPath MakeSiblingContainer(bool hFirst) {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  auto addG = [&path]() {
+    path.moveTo(0, 0);
+    path.lineTo(1000, 0);
+    path.lineTo(1000, 400);
+    path.lineTo(400, 400);
+    path.lineTo(400, 1000);
+    path.lineTo(0, 1000);
+    path.close();
+  };
+  auto addH = [&path]() {
+    path.addRect(pk::SkRect::MakeLTRB(500, 500, 1500, 700), pk::SkPathDirection::kCW);
+  };
+  auto addX = [&path]() {
+    path.moveTo(600, 550);
+    path.lineTo(700, 550);
+    path.lineTo(700, 650);
+    path.lineTo(600, 650);
+    path.close();
+  };
+  if (hFirst) {
+    addH();
+    addG();
+  } else {
+    addG();
+    addH();
+  }
+  addX();
+  return path;
+}
+
 std::vector<Case> MakeCases() {
   std::vector<Case> cases;
   cases.push_back({"SingleRing", MakeRing(0, 0, 1000, 1000, 200, 200, 800, 800),
@@ -461,6 +499,11 @@ std::vector<Case> MakeCases() {
                    {650, 650, 200, 150, 200, 500, 900, 900, 10, 10, 500, 500}});
   cases.push_back({"AncestorContainer", MakeAncestorContainer(),
                    {650, 650, 200, 200, 200, 500, 500, 500, 950, 500, 50, 50}});
+  // The same three contours, in both orders: the real container must be found either way.
+  const std::vector<float> siblingProbes = {650, 600, 1200, 600, 200, 200, 650, 900,
+                                            2000, 2000};
+  cases.push_back({"SiblingContainerGHX", MakeSiblingContainer(false), siblingProbes});
+  cases.push_back({"SiblingContainerHGX", MakeSiblingContainer(true), siblingProbes});
   return cases;
 }
 
@@ -605,6 +648,9 @@ void TestNormalizedDirections() {
   check(MakeBBoxParentNotch(), {1, -1, 1}, "NormalizedBBoxParentNotch");
   // Only G contains X. Stopping at the grandparent A would turn X the wrong way.
   check(MakeAncestorContainer(), {1, -1, 1, -1}, "NormalizedAncestorContainer");
+  // G and H are both outermost; X is a counter of H, whichever order they arrive in.
+  check(MakeSiblingContainer(false), {1, 1, -1}, "NormalizedSiblingContainerGHX");
+  check(MakeSiblingContainer(true), {1, 1, -1}, "NormalizedSiblingContainerHGX");
 }
 
 // The same conic traced out and back, so the two arcs cancel. No amount of refinement can put the
@@ -697,6 +743,25 @@ void TestAncestorContainerKeepsHole() {
          "the area around the hole was lost");
 }
 
+// The hole at (650,600) is inside H and X only. Both orders have to keep it open: with G first,
+// X sits under G in the bbox tree and its real container H is a sibling branch.
+void TestSiblingContainerKeepsHole() {
+  const bool orders[] = {false, true};
+  for (bool hFirst : orders) {
+    auto name = hFirst ? "SiblingContainerHGXKeepsHole" : "SiblingContainerGHXKeepsHole";
+    auto source = MakeSiblingContainer(hFirst);
+    pk::SkPath winding;
+    if (!pk::AsWinding(source, &winding)) {
+      Report(false, name, "AsWinding() returned false");
+      continue;
+    }
+    Report(!source.contains(650, 600), name, "even-odd source filled the hole");
+    Report(!winding.contains(650, 600), name, "the hole inside H was filled in");
+    Report(winding.contains(1200, 600), name, "the rest of H was lost");
+    Report(winding.contains(200, 200), name, "the L was lost");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -713,6 +778,7 @@ int main() {
   TestTJunctionKeepsHole();
   TestRejectsCrossingContour();
   TestAncestorContainerKeepsHole();
+  TestSiblingContainerKeepsHole();
   TestNonFiniteFails();
   std::printf("--- pk::SkOpBuilder::resolve (informational) ---\n");
   for (const auto& testCase : cases) {
