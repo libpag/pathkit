@@ -49,8 +49,16 @@ struct Contour {
     const int fVerbStart;
     const int fVerbEnd;
     Direction fDirection{Direction::kNone};
-    bool fContained{false};
+    // The innermost contour that actually contains this one, or null when none does. It need not
+    // be an ancestor in the bbox tree: a bbox parent may not enclose its child, and the real
+    // container can sit in a sibling branch. Contours that do not cross each other nest, so
+    // following this link repeatedly terminates.
+    Contour* fContainer{nullptr};
+    // Parent in the bbox tree, used to keep a contour's own descendants out of its candidates.
+    // The tree root has no parent.
+    Contour* fTreeParent{nullptr};
     bool fReverse{false};
+    bool fResolved{false};
     // Signed area of the contour: the exact part, plus where its conics sit in the shared list.
     // The pieces themselves are kept in one flat list rather than per contour, because these are
     // copied every time the contour vector grows.
@@ -545,11 +553,17 @@ public:
         return winding;
     }
 
-    bool containerContains(Contour& contour, Contour& test) {
+    bool containerContains(Contour& contour, Contour& test, bool* contained) {
+        *contained = false;
         // Any point of the test contour off the container's boundary reports the same winding, so
         // the first such ray decides containment. The common case needs exactly one ray: fSample
         // is computed once per contour, not once per query.
         if (PK_ScalarMax == test.fSample.fX) {
+            // kInitial accumulates the left-most point in fMinXY, so it has to start from scratch.
+            // A contour that already acted as a container holds the ray origin of some earlier
+            // query there, and an origin sharing this contour's left-most x would stop every edge
+            // from being recorded, leaving fSample unset.
+            test.fMinXY = {PK_ScalarMax, PK_ScalarMax};
             this->nextEdge(test, Edge::kInitial);
         }
         if (PK_ScalarMax == test.fSample.fX) {
@@ -560,7 +574,7 @@ public:
         bool onBoundary = false;
         int winding = this->nextEdge(contour, Edge::kCompare, &onBoundary);
         if (!onBoundary) {
-            test.fContained = winding != 0;
+            *contained = winding != 0;
             return -1 <= winding && winding <= 1;
         }
         // The first ray started on the container's boundary: a shared vertex, or a vertex sitting
@@ -612,7 +626,7 @@ public:
             // outlines are one case). Report failure instead of guessing a direction.
             return false;
         }
-        test.fContained = winding != 0;
+        *contained = winding != 0;
         return -1 <= winding && winding <= 1;
     }
 
@@ -627,50 +641,102 @@ public:
         // move parent's children into contour's children if contained by contour
         for (auto iter = parent.fChildren.begin(); iter != parent.fChildren.end(); ) {
             if (contour.fBounds.contains((*iter)->fBounds)) {
+                (*iter)->fTreeParent = &contour;
                 contour.fChildren.push_back(*iter);
                 iter = parent.fChildren.erase(iter);
                 continue;
             }
             ++iter;
         }
+        contour.fTreeParent = &parent;
         parent.fChildren.push_back(&contour);
     }
 
-    bool checkContainerChildren(Contour* parent, Contour* child) {
+    // A contour's own descendants cannot contain it, even when their bounds happen to line up.
+    bool isDescendant(const Contour& candidate, const Contour& ancestor) const {
+        for (const Contour* node = candidate.fTreeParent; node; node = node->fTreeParent) {
+            if (node == &ancestor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool checkContainerChildren(Contour* parent, Contour* child, vector<Contour>& all) {
         // Containment queries reuse the container's fMinXY as scratch storage for the ray origin.
-        // A contour's own origin lives in fSample, so acting as a container cannot clobber it.
-        if (parent && !containerContains(*parent, *child)) {
-            return false;
+        // A candidate may not have been tested yet, so containerContains() clears that scratch
+        // before computing a contour's own ray origin.
+        if (parent) {
+            bool contained = false;
+            if (!containerContains(*parent, *child, &contained)) {
+                return false;
+            }
+            if (contained) {
+                child->fContainer = parent;
+            } else {
+                // inParent() attaches a contour to the first child whose bounds fit, so the real
+                // container may be anywhere in the path, including a sibling branch. Every contour
+                // whose bounds hold the child is a candidate, apart from the child itself, the
+                // parent already tested, and the child's own descendants.
+                vector<Contour*> candidates;
+                for (auto& candidate : all) {
+                    if (&candidate == child || &candidate == parent ||
+                        !candidate.fBounds.contains(child->fBounds) ||
+                        isDescendant(candidate, *child)) {
+                        continue;
+                    }
+                    candidates.push_back(&candidate);
+                }
+                // Contours that really hold the child form a chain, so the one with the smallest
+                // bounds is the innermost. Sorting this way lets the search stop at the first hit,
+                // which usually costs only one or two extra rays.
+                std::stable_sort(candidates.begin(), candidates.end(),
+                                 [](const Contour* a, const Contour* b) {
+                                     return (double) a->fBounds.width() * a->fBounds.height() <
+                                            (double) b->fBounds.width() * b->fBounds.height();
+                                 });
+                for (auto container : candidates) {
+                    // A candidate is only a guess made from its bounds, so one that cannot be
+                    // decided says nothing about the rest: skip it and keep looking. Failing here
+                    // would sink a call whose real container was perfectly decidable.
+                    if (!containerContains(*container, *child, &contained)) {
+                        continue;
+                    }
+                    if (contained) {
+                        child->fContainer = container;
+                        break;
+                    }
+                }
+            }
         }
         for (auto grandChild : child->fChildren) {
-            if (!checkContainerChildren(child, grandChild)) {
+            if (!checkContainerChildren(child, grandChild, all)) {
                 return false;
             }
         }
         return true;
     }
 
-    bool markReverse(Contour* parent, Contour* child) {
-        bool reversed = false;
-        if (!parent) {
-            // A normalized outline runs every outermost contour clockwise, the way a stroker emits
-            // it. Writing that direction back before descending is what makes the comparison
-            // below turn the counters inside it the other way, whatever direction they came in.
-            if (child->fDirection == Contour::Direction::kCCW) {
-                child->fReverse = true;
-                child->fDirection = Contour::Direction::kCW;
-                reversed = true;
-            }
-        } else if (parent->fDirection == child->fDirection) {
-            child->fReverse = true;
-            child->fDirection = (Contour::Direction) -(int) child->fDirection;
-            reversed = true;
+    // A container can be in a sibling branch, so walking the bbox tree no longer guarantees its
+    // direction is decided before its children's. Resolve it recursively instead, and cache the
+    // answer so a contour containing many others is only computed once.
+    Contour::Direction resolve(Contour* contour) {
+        if (contour->fResolved) {
+            return contour->fDirection;
         }
-        // Descendants must be compared against their parent's final direction.
-        for (auto grandChild : child->fChildren) {
-            reversed |= markReverse(grandChild->fContained ? child : parent, grandChild);
+        contour->fResolved = true;
+        // A normalized outline runs every outermost contour clockwise, the way a stroker emits
+        // it; a contour inside another runs the opposite way from its container's final direction.
+        auto want = contour->fContainer ? (Contour::Direction) -(int) resolve(contour->fContainer)
+                                        : Contour::Direction::kCW;
+        // Only a contour running the other way is turned around. A contour whose signed area is
+        // zero has no direction to compare: it encloses nothing, so reversing it would rebuild the
+        // whole path and move where a dash or trim starts on it without changing what is filled.
+        if (contour->fDirection == (Contour::Direction) -(int) want) {
+            contour->fReverse = true;
+            contour->fDirection = want;
         }
-        return reversed;
+        return want;
     }
 
     SkPath reverseMarkedContours(vector<Contour>& contours, SkPathFillType fillType) {
@@ -775,17 +841,23 @@ bool AsWinding(const SkPath& path, SkPath* result) {
     for (auto& contour : contours) {
         winder.inParent(contour, sorted);
     }
-    // starting with outermost and moving inward, see if one path contains another. Outermost
-    // contours are only ever containers, so their ray origin is never needed.
+    // Find the contour that really contains each one. The bbox tree only orders bounds, so the
+    // candidates come from the whole path rather than just the tree ancestors. Outermost contours
+    // are only ever containers, so their ray origin is never needed.
     for (auto contour : sorted.fChildren) {
-        if (!winder.checkContainerChildren(nullptr, contour)) {
+        if (!winder.checkContainerChildren(nullptr, contour, contours)) {
             return false;
         }
     }
-    // starting with outermost and moving inward, mark paths to reverse
+    // Containers may be in sibling branches, so directions cannot be decided in tree order. A
+    // resolve() may flip a contour reached later in this loop through recursion, so collect the
+    // reverse marks afterwards rather than comparing directions as each one is visited.
+    for (auto& contour : contours) {
+        winder.resolve(&contour);
+    }
     bool reversed = false;
-    for (auto contour : sorted.fChildren) {
-        reversed |= winder.markReverse(nullptr, contour);
+    for (const auto& contour : contours) {
+        reversed |= contour.fReverse;
     }
     if (!reversed) {
         return set_result_path(result, path, fillType);

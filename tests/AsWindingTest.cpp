@@ -349,6 +349,126 @@ pk::SkPath MakeCrossingContour() {
   return path;
 }
 
+// A C-shaped outline G holds a smaller C-shaped outline P, both with their notches opening right.
+// X sits in the notch of both, so it is an island even though its bounds put it under P in the
+// bbox tree. P does not contain X, and neither does G, so X has no container at all: it has to be
+// normalized clockwise like any outermost contour instead of being compared against G.
+pk::SkPath MakeBBoxParentNotch() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.moveTo(0, 0);
+  path.lineTo(1000, 0);
+  path.lineTo(1000, 300);
+  path.lineTo(400, 300);
+  path.lineTo(400, 800);
+  path.lineTo(1000, 800);
+  path.lineTo(1000, 1000);
+  path.lineTo(0, 1000);
+  path.close();
+  path.moveTo(50, 50);
+  path.lineTo(950, 50);
+  path.lineTo(950, 250);
+  path.lineTo(380, 250);
+  path.lineTo(380, 850);
+  path.lineTo(950, 850);
+  path.lineTo(950, 950);
+  path.lineTo(50, 950);
+  path.close();
+  path.addRect(pk::SkRect::MakeLTRB(600, 600, 700, 700), pk::SkPathDirection::kCCW);
+  return path;
+}
+
+// Four outlines: a rect G, a C-shape A inside it, a C-shape P inside A, and a 100 by 100 square
+// X (signed area -10000) in the notch of both A and P. X's bbox parent is P, but the only outline
+// that really contains X is G, two levels further up. Comparing X against the grandparent A
+// gives it the wrong direction and fills (650,650), which even-odd leaves open.
+pk::SkPath MakeAncestorContainer() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+  path.moveTo(100, 100);
+  path.lineTo(100, 900);
+  path.lineTo(900, 900);
+  path.lineTo(900, 800);
+  path.lineTo(400, 800);
+  path.lineTo(400, 300);
+  path.lineTo(900, 300);
+  path.lineTo(900, 100);
+  path.close();
+  path.moveTo(150, 150);
+  path.lineTo(850, 150);
+  path.lineTo(850, 250);
+  path.lineTo(350, 250);
+  path.lineTo(350, 850);
+  path.lineTo(850, 850);
+  path.lineTo(850, 890);
+  path.lineTo(150, 890);
+  path.close();
+  path.addRect(pk::SkRect::MakeLTRB(600, 600, 700, 700), pk::SkPathDirection::kCCW);
+  return path;
+}
+
+// G is an L whose notch opens to the upper right. H is a bar lying in that notch but reaching
+// past G's bounds, so neither bounds contains the other's. X is inside H only. Both G and H have
+// bounds that contain X, but inParent() hangs X under whichever comes first: with G first its
+// real container H is a sibling branch, not an ancestor. Treating X as outermost then makes it
+// run the same way as H and silently fills (650,600), even though even-odd leaves it open.
+pk::SkPath MakeSiblingContainer(bool hFirst) {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  auto addG = [&path]() {
+    path.moveTo(0, 0);
+    path.lineTo(1000, 0);
+    path.lineTo(1000, 400);
+    path.lineTo(400, 400);
+    path.lineTo(400, 1000);
+    path.lineTo(0, 1000);
+    path.close();
+  };
+  auto addH = [&path]() {
+    path.addRect(pk::SkRect::MakeLTRB(500, 500, 1500, 700), pk::SkPathDirection::kCW);
+  };
+  auto addX = [&path]() {
+    path.moveTo(600, 550);
+    path.lineTo(700, 550);
+    path.lineTo(700, 650);
+    path.lineTo(600, 650);
+    path.close();
+  };
+  if (hFirst) {
+    addH();
+    addG();
+  } else {
+    addG();
+    addH();
+  }
+  addX();
+  return path;
+}
+
+// O holds a C-shaped G and a bar K that reaches past G. X sits in G's notch, inside K only, and
+// shares K's left edge. X's bbox parent is G, so K is consulted as a candidate container before
+// the walk reaches K itself. The ray origin a containment query leaves on K would then be the
+// starting value for K's own left-most point, and since it shares K's left-most x, no edge of K
+// could improve on it: K would end up with no ray origin and the conversion would fail.
+pk::SkPath MakeUntestedCandidateSharedEdge() {
+  pk::SkPath path;
+  path.setFillType(pk::SkPathFillType::kEvenOdd);
+  path.addRect(pk::SkRect::MakeLTRB(0, 0, 2000, 2000), pk::SkPathDirection::kCW);
+  path.moveTo(100, 100);
+  path.lineTo(900, 100);
+  path.lineTo(900, 400);
+  path.lineTo(600, 400);
+  path.lineTo(600, 600);
+  path.lineTo(900, 600);
+  path.lineTo(900, 900);
+  path.lineTo(100, 900);
+  path.close();
+  path.addRect(pk::SkRect::MakeLTRB(700, 430, 1500, 570), pk::SkPathDirection::kCW);
+  path.addRect(pk::SkRect::MakeLTRB(700, 450, 800, 510), pk::SkPathDirection::kCW);
+  return path;
+}
+
 std::vector<Case> MakeCases() {
   std::vector<Case> cases;
   cases.push_back({"SingleRing", MakeRing(0, 0, 1000, 1000, 200, 200, 800, 800),
@@ -398,6 +518,17 @@ std::vector<Case> MakeCases() {
                    {400, 400, 950, 400, 100, 100}});
   cases.push_back({"HorizontalInterior", MakeHorizontalInterior(),
                    {500, 400, 500, 100, 500, 900}});
+  cases.push_back({"BBoxParentNotch", MakeBBoxParentNotch(),
+                   {650, 650, 200, 150, 200, 500, 900, 900, 10, 10, 500, 500}});
+  cases.push_back({"AncestorContainer", MakeAncestorContainer(),
+                   {650, 650, 200, 200, 200, 500, 500, 500, 950, 500, 50, 50}});
+  // The same three contours, in both orders: the real container must be found either way.
+  const std::vector<float> siblingProbes = {650, 600, 1200, 600, 200, 200, 650, 900,
+                                            2000, 2000};
+  cases.push_back({"SiblingContainerGHX", MakeSiblingContainer(false), siblingProbes});
+  cases.push_back({"SiblingContainerHGX", MakeSiblingContainer(true), siblingProbes});
+  cases.push_back({"UntestedCandidateSharedEdge", MakeUntestedCandidateSharedEdge(),
+                   {750, 480, 1000, 500, 200, 200, 50, 50, 650, 450, 2500, 2500}});
   return cases;
 }
 
@@ -538,6 +669,16 @@ void TestNormalizedDirections() {
   check(MakeTJunction(0.0f, std::nextafter(200.0f, 300.0f)), {1, -1},
         "NormalizedTJunctionNudgedVertex");
   check(MakeHorizontalInterior(), {1, -1}, "NormalizedHorizontalInterior");
+  // X is nested in the bbox tree but in no outline at all: it is still an outermost contour.
+  check(MakeBBoxParentNotch(), {1, -1, 1}, "NormalizedBBoxParentNotch");
+  // Only G contains X. Stopping at the grandparent A would turn X the wrong way.
+  check(MakeAncestorContainer(), {1, -1, 1, -1}, "NormalizedAncestorContainer");
+  // G and H are both outermost; X is a counter of H, whichever order they arrive in.
+  check(MakeSiblingContainer(false), {1, 1, -1}, "NormalizedSiblingContainerGHX");
+  check(MakeSiblingContainer(true), {1, 1, -1}, "NormalizedSiblingContainerHGX");
+  // K contains X and is itself a counter of O, so X runs the same way as O again.
+  check(MakeUntestedCandidateSharedEdge(), {1, -1, -1, 1},
+        "NormalizedUntestedCandidateSharedEdge");
 }
 
 // The same conic traced out and back, so the two arcs cancel. No amount of refinement can put the
@@ -611,6 +752,93 @@ void TestRejectsCrossingContour() {
   Report(winding == before, "CrossingContour", "a failed call overwrote the result");
 }
 
+// (650,650) is inside G and X under even-odd, so it is a hole. X's bbox parent P does not contain
+// it; the only real container is G, two levels further up. Comparing X against A instead reverses
+// it and fills the hole.
+void TestAncestorContainerKeepsHole() {
+  auto source = MakeAncestorContainer();
+  pk::SkPath winding;
+  if (!pk::AsWinding(source, &winding)) {
+    Report(false, "AncestorContainerKeepsHole", "AsWinding() returned false");
+    return;
+  }
+  Report(!source.contains(650, 650), "AncestorContainerKeepsHole",
+         "even-odd source filled the hole");
+  Report(winding.getFillType() == pk::SkPathFillType::kWinding, "AncestorContainerKeepsHole",
+         "the fill type was not changed to winding");
+  Report(!winding.contains(650, 650), "AncestorContainerKeepsHole", "the hole was filled in");
+  Report(source.contains(200, 200) && winding.contains(200, 200), "AncestorContainerKeepsHole",
+         "the area around the hole was lost");
+}
+
+// The hole at (650,600) is inside H and X only. Both orders have to keep it open: with G first,
+// X sits under G in the bbox tree and its real container H is a sibling branch.
+void TestSiblingContainerKeepsHole() {
+  const bool orders[] = {false, true};
+  for (bool hFirst : orders) {
+    auto name = hFirst ? "SiblingContainerHGXKeepsHole" : "SiblingContainerGHXKeepsHole";
+    auto source = MakeSiblingContainer(hFirst);
+    pk::SkPath winding;
+    if (!pk::AsWinding(source, &winding)) {
+      Report(false, name, "AsWinding() returned false");
+      continue;
+    }
+    Report(!source.contains(650, 600), name, "even-odd source filled the hole");
+    Report(!winding.contains(650, 600), name, "the hole inside H was filled in");
+    Report(winding.contains(1200, 600), name, "the rest of H was lost");
+    Report(winding.contains(200, 200), name, "the L was lost");
+  }
+}
+
+// A contour traced out and back encloses nothing, so it has no direction to normalize. Turning it
+// around would not change what the path fills, but it would move where a dash or trim starts on
+// that contour, so it has to come back running the way it arrived.
+//
+// The two ends differ by a power of two on purpose. The signed area integrates x * dy - y * dx,
+// which cancels along a doubled-back segment only if both products are exact; at other offsets
+// each rounds on its own and the contour is handed a direction made of nothing but that residue.
+void TestDegenerateContourIsLeftAlone() {
+  const char* name = "DegenerateContourIsLeftAlone";
+  pk::SkPath source;
+  source.setFillType(pk::SkPathFillType::kEvenOdd);
+  source.addRect(pk::SkRect::MakeLTRB(0, 0, 1000, 1000), pk::SkPathDirection::kCW);
+  source.moveTo(256, 256);
+  source.lineTo(768, 768);
+  source.close();
+  pk::SkPath winding;
+  if (!pk::AsWinding(source, &winding)) {
+    Report(false, name, "AsWinding() returned false");
+    return;
+  }
+  // Nothing else in the path runs between these two points, so the first edge joining them is the
+  // spike's own, and the end it leaves from says which way round it came back. Comparing the whole
+  // path instead would also fail on a rebuild triggered by some other contour, which says nothing
+  // about this one.
+  bool found = false;
+  pk::SkPoint start = {0, 0};
+  pk::SkPath::Iter iter(winding, false);
+  pk::SkPoint pts[4];
+  pk::SkPath::Verb verb;
+  while (!found && (verb = iter.next(pts)) != pk::SkPath::kDone_Verb) {
+    if (verb != pk::SkPath::kLine_Verb) {
+      continue;
+    }
+    bool forward = pts[0].fX == 256 && pts[0].fY == 256 && pts[1].fX == 768 && pts[1].fY == 768;
+    bool backward = pts[0].fX == 768 && pts[0].fY == 768 && pts[1].fX == 256 && pts[1].fY == 256;
+    if (forward || backward) {
+      found = true;
+      start = pts[0];
+    }
+  }
+  if (!found) {
+    Report(false, name, "the contour enclosing nothing is not in the result");
+    return;
+  }
+  std::string detail = "a contour enclosing nothing was turned around: it now starts at " +
+                       std::to_string(start.fX) + "," + std::to_string(start.fY);
+  Report(start.fX == 256 && start.fY == 256, name, detail.c_str());
+}
+
 }  // namespace
 
 int main() {
@@ -626,6 +854,9 @@ int main() {
   TestRejectsCoincidentContours();
   TestTJunctionKeepsHole();
   TestRejectsCrossingContour();
+  TestAncestorContainerKeepsHole();
+  TestSiblingContainerKeepsHole();
+  TestDegenerateContourIsLeftAlone();
   TestNonFiniteFails();
   std::printf("--- pk::SkOpBuilder::resolve (informational) ---\n");
   for (const auto& testCase : cases) {
