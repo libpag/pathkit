@@ -51,7 +51,8 @@ struct Contour {
     Direction fDirection{Direction::kNone};
     // The innermost contour that actually contains this one, or null when none does. It need not
     // be an ancestor in the bbox tree: a bbox parent may not enclose its child, and the real
-    // container can sit in a sibling branch.
+    // container can sit in a sibling branch. Contours that do not cross each other nest, so
+    // following this link repeatedly terminates.
     Contour* fContainer{nullptr};
     // Parent in the bbox tree, used to keep a contour's own descendants out of its candidates.
     // The tree root has no parent.
@@ -558,6 +559,11 @@ public:
         // the first such ray decides containment. The common case needs exactly one ray: fSample
         // is computed once per contour, not once per query.
         if (PK_ScalarMax == test.fSample.fX) {
+            // kInitial accumulates the left-most point in fMinXY, so it has to start from scratch.
+            // A contour that already acted as a container holds the ray origin of some earlier
+            // query there, and an origin sharing this contour's left-most x would stop every edge
+            // from being recorded, leaving fSample unset.
+            test.fMinXY = {PK_ScalarMax, PK_ScalarMax};
             this->nextEdge(test, Edge::kInitial);
         }
         if (PK_ScalarMax == test.fSample.fX) {
@@ -658,7 +664,8 @@ public:
 
     bool checkContainerChildren(Contour* parent, Contour* child, vector<Contour>& all) {
         // Containment queries reuse the container's fMinXY as scratch storage for the ray origin.
-        // A contour's own origin lives in fSample, so acting as a container cannot clobber it.
+        // A candidate may not have been tested yet, so containerContains() clears that scratch
+        // before computing a contour's own ray origin.
         if (parent) {
             bool contained = false;
             if (!containerContains(*parent, *child, &contained)) {
@@ -689,8 +696,11 @@ public:
                                             (double) b->fBounds.width() * b->fBounds.height();
                                  });
                 for (auto container : candidates) {
+                    // A candidate is only a guess made from its bounds, so one that cannot be
+                    // decided says nothing about the rest: skip it and keep looking. Failing here
+                    // would sink a call whose real container was perfectly decidable.
                     if (!containerContains(*container, *child, &contained)) {
-                        return false;
+                        continue;
                     }
                     if (contained) {
                         child->fContainer = container;
@@ -719,7 +729,10 @@ public:
         // it; a contour inside another runs the opposite way from its container's final direction.
         auto want = contour->fContainer ? (Contour::Direction) -(int) resolve(contour->fContainer)
                                         : Contour::Direction::kCW;
-        if (contour->fDirection != want) {
+        // Only a contour running the other way is turned around. A contour whose signed area is
+        // zero has no direction to compare: it encloses nothing, so reversing it would rebuild the
+        // whole path and move where a dash or trim starts on it without changing what is filled.
+        if (contour->fDirection == (Contour::Direction) -(int) want) {
             contour->fReverse = true;
             contour->fDirection = want;
         }
